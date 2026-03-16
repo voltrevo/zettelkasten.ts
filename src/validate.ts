@@ -6,6 +6,8 @@ import { minify } from "./minify.ts";
 const ATOM_IMPORT_RE =
   /^\.\.\/\.\.\/[a-z0-9]{2}\/[a-z0-9]{2}\/[a-z0-9]{21}\.ts$/;
 
+export type ValidationError = { message: string };
+
 export const MAX_GZIP_BYTES = 768;
 
 async function gzipSize(text: string): Promise<number> {
@@ -45,20 +47,30 @@ export async function validateAtom(
       }
     }
 
-    // Count and validate exports
-    if (ts.isExportDeclaration(node) || ts.isExportAssignment(node)) {
+    // Count and validate exports — type-only exports (type, interface) are
+    // allowed in any number; only value exports are restricted to exactly one.
+    if (ts.isExportAssignment(node)) {
+      // export default — always a value export
       exportCount++;
+    } else if (ts.isExportDeclaration(node)) {
+      // export { ... } or export type { ... }
+      if (!node.isTypeOnly) exportCount++;
+    } else if (
+      ts.isTypeAliasDeclaration(node) ||
+      ts.isInterfaceDeclaration(node)
+    ) {
+      // type-only declarations — do not count toward value export limit
     } else if (
       ts.isFunctionDeclaration(node) ||
       ts.isClassDeclaration(node) ||
-      ts.isTypeAliasDeclaration(node) ||
-      ts.isInterfaceDeclaration(node) ||
       ts.isEnumDeclaration(node)
     ) {
       const mods = ts.getCombinedModifierFlags(node as ts.Declaration);
       if (mods & ts.ModifierFlags.Export) exportCount++;
     } else if (ts.isVariableStatement(node)) {
-      const mods = ts.getCombinedModifierFlags(node);
+      const mods = ts.getCombinedModifierFlags(
+        node as unknown as ts.Declaration,
+      );
       if (mods & ts.ModifierFlags.Export) {
         exportCount++;
         // Reject exported let (mutable)

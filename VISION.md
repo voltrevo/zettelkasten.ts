@@ -35,15 +35,39 @@
     randomness) must occur only through **explicit capability interfaces passed
     as parameters**, not imports.
 
+    - The capability parameter is conventionally named **`cap`** and is always
+      the **first argument** of a function atom or the **first constructor
+      argument** of a class atom (stored as `this.cap`). Its type declares
+      exactly the external surface the atom requires, e.g.
+      `cap: { Math: Pick<Math, "random">; fetch: typeof fetch }`.
+    - The **real-world `cap` mirrors the global API** — callers pass
+      `{ Math, Date, fetch, crypto }` — making the default binding zero-cost.
+      Test implementations substitute only the capabilities under test.
+    - An atom that needs external capabilities **should export a `Cap` type**
+      alongside its primary export. Atoms with no external dependencies need not
+      export `Cap`. If an atom imports other atoms that export `Cap`, its own
+      `Cap` is the intersection of those plus any additional capabilities it
+      needs directly:
+      `export type Cap = DepA.Cap & DepB.Cap & { fetch: typeof fetch }`.
+      TypeScript structural typing ensures the caller satisfies the full surface
+      once, regardless of how many atoms share the same capability.
+    - The **assembly point** satisfies the full transitive `Cap` surface by
+      passing the actual globals; capability auditing can be done statically by
+      inspecting exported `Cap` types across the atom graph.
+
 11. Atom submission goes through a **server validation pipeline** including
     parsing, normalization, hashing, static analysis, metadata extraction, and
     storage. ~ _hashing, storage, and static analysis implemented; normalization
     and metadata not yet_
 
-12. Validation enforces constraints such as **exactly one export, restricted
-    imports, absence of obvious singleton patterns, and limits on size or
-    complexity**. ~ _exactly one export, restricted imports, and gzip size limit
-    (768 bytes) enforced; singleton patterns and complexity limits not yet_
+12. Validation enforces constraints such as **exactly one value export,
+    restricted imports, absence of obvious singleton patterns, and limits on
+    size or complexity**. Additional **type-only exports are permitted** (e.g.
+    `export type Cap = ...`). All exports must be **named**;
+    `export
+    default` is forbidden. ~ _one value export, restricted imports,
+    gzip size limit (768 bytes), and type-only export allowance enforced;
+    default export rejection, singleton patterns, and complexity limits not yet_
 
 13. Static analysis heuristics detect patterns such as **exported mutable
     variables, top-level mutation, static mutable fields, or implicit caches**.
