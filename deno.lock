@@ -1,0 +1,23 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@std/cli@*": "1.0.28",
+    "npm:@noble/hashes@*": "1.8.0",
+    "npm:@noble/hashes@^1.6.0": "1.8.0"
+  },
+  "jsr": {
+    "@std/cli@1.0.28": {
+      "integrity": "74ef9b976db59ca6b23a5283469c9072be6276853807a83ec6c7ce412135c70a"
+    }
+  },
+  "npm": {
+    "@noble/hashes@1.8.0": {
+      "integrity": "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:@noble/hashes@^1.6.0"
+    ]
+  }
+}

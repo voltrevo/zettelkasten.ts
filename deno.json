@@ -1,0 +1,13 @@
+{
+  "name": "zettelkasten",
+  "version": "0.1.0",
+  "exports": "./main.ts",
+  "imports": {
+    "@noble/hashes/sha3": "npm:@noble/hashes@^1.6.0/sha3",
+    "@std/cli/parse-args": "jsr:@std/cli@^1.0.28/parse-args"
+  },
+  "tasks": {
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run=git main.ts",
+    "zk": "deno run --allow-net --allow-read --allow-env cli.ts"
+  }
+}
