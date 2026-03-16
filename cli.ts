@@ -16,10 +16,10 @@ switch (command) {
       console.error("usage: zk get <path|hash>");
       Deno.exit(1);
     }
-    // accept full path (/h/1l/15/xxx.ts) or bare 25-char hash
+    // accept full path (/a/1l/15/xxx.ts) or bare 25-char hash
     const url = ref.startsWith("/")
       ? `${BASE_URL}${ref}`
-      : `${BASE_URL}/h/${ref.slice(0, 2)}/${ref.slice(2, 4)}/${ref.slice(4)}.ts`;
+      : `${BASE_URL}/a/${ref.slice(0, 2)}/${ref.slice(2, 4)}/${ref.slice(4)}.ts`;
 
     const res = await fetch(url);
     if (!res.ok) {
@@ -46,7 +46,7 @@ switch (command) {
       Deno.exit(1);
     }
 
-    const res = await fetch(`${BASE_URL}/h`, {
+    const res = await fetch(`${BASE_URL}/a`, {
       method: "POST",
       headers: { "x-commit-message": message },
       body: content,
