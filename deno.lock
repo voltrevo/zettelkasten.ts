@@ -4,7 +4,8 @@
     "jsr:@std/cli@*": "1.0.28",
     "jsr:@std/cli@^1.0.28": "1.0.28",
     "npm:@noble/hashes@*": "1.8.0",
-    "npm:@noble/hashes@^1.6.0": "1.8.0"
+    "npm:@noble/hashes@^1.6.0": "1.8.0",
+    "npm:typescript@^5.8.2": "5.9.3"
   },
   "jsr": {
     "@std/cli@1.0.28": {
@@ -14,12 +15,17 @@
   "npm": {
     "@noble/hashes@1.8.0": {
       "integrity": "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="
+    },
+    "typescript@5.9.3": {
+      "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==",
+      "bin": true
     }
   },
   "workspace": {
     "dependencies": [
       "jsr:@std/cli@^1.0.28",
-      "npm:@noble/hashes@^1.6.0"
+      "npm:@noble/hashes@^1.6.0",
+      "npm:typescript@^5.8.2"
     ]
   }
 }

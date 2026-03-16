@@ -1,4 +1,5 @@
 import { keccak_256 } from "@noble/hashes/sha3";
+import { validateAtom } from "./validate.ts";
 
 const STORAGE_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
 
@@ -77,6 +78,11 @@ Deno.serve({ port: 8000 }, async (req: Request) => {
     const content = await req.text();
     if (!content) {
       return new Response("Empty content", { status: 400 });
+    }
+
+    const validationError = validateAtom(content);
+    if (validationError) {
+      return new Response(validationError.message, { status: 422 });
     }
 
     const hash = contentHash(content);

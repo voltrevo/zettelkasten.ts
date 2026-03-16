@@ -1,6 +1,6 @@
 # Manual Test Plan
 
-These tests cover the critical invariants of the system. They are not exhaustive — the goal is to verify the properties that matter most: content-addressing correctness, idempotency, and round-trip fidelity. Edge cases and error handling are secondary.
+These tests cover the critical invariants of the system. They are not exhaustive — edge cases are out of scope.
 
 ---
 
@@ -28,3 +28,16 @@ Posting duplicate content should not produce a new commit.
 ## 5. CLI mirrors HTTP behaviour
 
 `zk post -m <message> [file|stdin]` and `zk get <path|hash>` should produce the same results as the equivalent `curl` calls. Verify both file and stdin input modes for `post`.
+
+## 6. Validation rejects invalid atoms
+
+The server should return 422 for each of the following, with a descriptive error message:
+
+- No exports
+- More than one export
+- An exported `let` (mutable)
+- An import that is not a relative atom path (`../../xx/yy/<21chars>.ts`)
+
+Valid atoms must be accepted: a single `export const`, a single `export function`, a single `export class`, and an atom with a valid relative atom import.
+
+Validation must run before hashing and storage — a rejected atom should not appear in the git log.
