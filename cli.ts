@@ -19,7 +19,9 @@ switch (command) {
     // accept full path (/a/1l/15/xxx.ts) or bare 25-char hash
     const url = ref.startsWith("/")
       ? `${BASE_URL}${ref}`
-      : `${BASE_URL}/a/${ref.slice(0, 2)}/${ref.slice(2, 4)}/${ref.slice(4)}.ts`;
+      : `${BASE_URL}/a/${ref.slice(0, 2)}/${ref.slice(2, 4)}/${
+        ref.slice(4)
+      }.ts`;
 
     const res = await fetch(url);
     if (!res.ok) {
@@ -66,12 +68,17 @@ switch (command) {
     Deno.exit(1);
 }
 
-async function readAll(readable: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+async function readAll(
+  readable: ReadableStream<Uint8Array>,
+): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   for await (const chunk of readable) chunks.push(chunk);
   const total = chunks.reduce((n, c) => n + c.length, 0);
   const out = new Uint8Array(total);
   let offset = 0;
-  for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
   return out;
 }

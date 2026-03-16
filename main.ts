@@ -1,5 +1,5 @@
 import { keccak_256 } from "@noble/hashes/sha3";
-import { validateAtom } from "./validate.ts";
+import { validateAtom } from "./src/validate.ts";
 
 const STORAGE_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
 
@@ -46,7 +46,9 @@ function hashToUrlPath(hash: string): string {
 }
 
 function hashToFilePath(hash: string): string {
-  return `${STORAGE_DIR}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`;
+  return `${STORAGE_DIR}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
+    hash.slice(4)
+  }.ts`;
 }
 
 Deno.serve({ port: 8000 }, async (req: Request) => {
@@ -55,7 +57,9 @@ Deno.serve({ port: 8000 }, async (req: Request) => {
 
   // GET /a/<aa>/<bb>/<rest>.ts — retrieve code by content address
   if (req.method === "GET") {
-    const match = path.match(/^\/a\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+)\.ts$/);
+    const match = path.match(
+      /^\/a\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+)\.ts$/,
+    );
     if (match) {
       const filePath = `${STORAGE_DIR}${path}`;
       try {
@@ -80,7 +84,7 @@ Deno.serve({ port: 8000 }, async (req: Request) => {
       return new Response("Empty content", { status: 400 });
     }
 
-    const validationError = validateAtom(content);
+    const validationError = await validateAtom(content);
     if (validationError) {
       return new Response(validationError.message, { status: 422 });
     }
@@ -92,13 +96,19 @@ Deno.serve({ port: 8000 }, async (req: Request) => {
     try {
       await Deno.stat(filePath);
       // already exists — idempotent, no commit needed
-      return new Response(`${urlPath}\n`, { status: 200, headers: { "content-type": "text/plain" } });
+      return new Response(`${urlPath}\n`, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
     } catch { /* not found, proceed */ }
 
     await Deno.mkdir(filePath.replace(/\/[^/]+$/, ""), { recursive: true });
     await Deno.writeTextFile(filePath, content);
 
-    await git("add", `a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`);
+    await git(
+      "add",
+      `a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`,
+    );
     await git("commit", "-m", `${hash.slice(0, 8)}: ${message}`);
 
     return new Response(`${urlPath}\n`, {
@@ -111,5 +121,9 @@ Deno.serve({ port: 8000 }, async (req: Request) => {
 });
 
 console.log("Listening on http://localhost:8000");
-console.log("  POST /a                        — store atom (requires X-Commit-Message header)");
-console.log("  GET  /a/<aa>/<bb>/<rest>.ts    — retrieve code by content address");
+console.log(
+  "  POST /a                        — store atom (requires X-Commit-Message header)",
+);
+console.log(
+  "  GET  /a/<aa>/<bb>/<rest>.ts    — retrieve code by content address",
+);
