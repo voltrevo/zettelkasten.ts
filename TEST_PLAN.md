@@ -55,7 +55,19 @@ atom import.
 Validation must run before hashing and storage — a rejected atom should not
 appear in the git log.
 
-## 7. Daemon lifecycle
+## 7. Request logging and log rotation
+
+After `zts start` and `zts restart`, `zts log` should show lines of the form:
+`<ISO-timestamp> <METHOD> <path> <status> <Xms>` for each request made.
+
+`zts log -f` should follow the log in real time (exit with Ctrl-C).
+
+`zts log -n 10` should show the last 10 lines.
+
+Verify the logrotate timer is active:
+`systemctl --user list-timers zts-logrotate`.
+
+## 8. Daemon lifecycle
 
 `zts start` should write a systemd user unit, enable it, and start it. Verify
 with `systemctl --user status zettelkasten` — expect `active (running)`.

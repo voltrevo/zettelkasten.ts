@@ -51,6 +51,19 @@ function hashToFilePath(hash: string): string {
 }
 
 async function handler(req: Request): Promise<Response> {
+  const start = performance.now();
+  const res = await route(req);
+  const ms = (performance.now() - start).toFixed(1);
+  const url = new URL(req.url);
+  console.log(
+    `${
+      new Date().toISOString()
+    } ${req.method} ${url.pathname} ${res.status} ${ms}ms`,
+  );
+  return res;
+}
+
+async function route(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
