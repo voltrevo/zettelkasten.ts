@@ -24,7 +24,7 @@
 
 13. Static analysis heuristics detect patterns such as **exported mutable variables, top-level mutation, static mutable fields, or implicit caches**.
 
-14. Atoms are stored in **content-addressed files named by hash**, optionally sharded by prefix.
+14. Atoms are stored in **content-addressed files named by hash**, sharded as `<2chars>/<2chars>/<remainder>.ts`.
 
 15. A **relational database tracks atoms, tests, relationships, problems, and optional metadata**.
 
