@@ -67,7 +67,22 @@ After `zts start` and `zts restart`, `zts log` should show lines of the form:
 Verify the logrotate timer is active:
 `systemctl --user list-timers zts-logrotate`.
 
-## 8. Daemon lifecycle
+## 8. Exec subcommand
+
+Post an atom that exports `main` and prints something observable:
+
+```typescript
+export function main(cap: { console: Pick<Console, "log"> }) {
+  cap.console.log("exec ok");
+}
+```
+
+Run `zts exec <hash>` — expect `exec ok` printed to stdout.
+
+Post an atom whose single export is not named `main`. Run `zts exec <hash>` —
+expect an error message and non-zero exit.
+
+## 9. Daemon lifecycle
 
 `zts start` should write a systemd user unit, enable it, and start it. Verify
 with `systemctl --user status zettelkasten` — expect `active (running)`.

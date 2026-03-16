@@ -110,7 +110,12 @@
     represented purely by graph relationships.
 
 25. Execution occurs by assembling a **dependency graph of atom imports plus
-    concrete implementations of external capability interfaces**.
+    concrete implementations of external capability interfaces**. The CLI serves
+    as the **universal entry point**: `zts exec <hash>` dynamically imports the
+    root atom and calls `main(globalThis)`; the root atom is responsible for
+    assembling capabilities for its dependency graph. Root atoms must export
+    their entry function as **`main`**. ~ _`zts exec` implemented; graph safety
+    checks not yet_
 
 26. Atoms are **imported directly via Deno URL imports**, e.g.
     `https://atom-server/a/xy/zw/<remainder>.ts`.

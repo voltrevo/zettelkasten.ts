@@ -48,6 +48,10 @@ switch (command) {
     await cmdPost(rest);
     break;
 
+  case "exec":
+    await cmdExec(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -64,6 +68,9 @@ switch (command) {
     );
     console.error(
       "  post -m <message> [file]     store code (stdin if no file)",
+    );
+    console.error(
+      "  exec <hash>                  execute root atom's main(globalThis)",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -215,6 +222,23 @@ async function cmdPost(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
   console.log((await res.text()).trim());
+}
+
+async function cmdExec(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts exec <hash>");
+    Deno.exit(1);
+  }
+  const url = `${BASE_URL}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
+    hash.slice(4)
+  }.ts`;
+  const mod = await import(url);
+  if (typeof mod.main !== "function") {
+    console.error("error: atom does not export a 'main' function");
+    Deno.exit(1);
+  }
+  await mod.main(globalThis);
 }
 
 async function readAll(
