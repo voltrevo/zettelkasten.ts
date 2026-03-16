@@ -15,7 +15,7 @@ content. Expect a different hash.
 Post an atom via HTTP and retrieve it by the returned path. Expect byte-for-byte
 identical content.
 
-Repeat using the CLI (`zk post` → `zk get`), including both path and bare-hash
+Repeat using the CLI (`zts post` → `zts get`), including both path and bare-hash
 forms.
 
 ## 3. Hash encodes correctly into path
@@ -33,9 +33,9 @@ Posting duplicate content should not produce a new commit.
 
 ## 5. CLI mirrors HTTP behaviour
 
-`zk post -m <message> [file|stdin]` and `zk get <path|hash>` should produce the
-same results as the equivalent `curl` calls. Verify both file and stdin input
-modes for `post`.
+`zts post -m <message> [file|stdin]` and `zts get <path|hash>` should produce
+the same results as the equivalent `curl` calls. Verify both file and stdin
+input modes for `post`.
 
 ## 6. Validation rejects invalid atoms
 
@@ -54,3 +54,18 @@ atom import.
 
 Validation must run before hashing and storage — a rejected atom should not
 appear in the git log.
+
+## 7. Daemon lifecycle
+
+`zts start` should write a systemd user unit, enable it, and start it. Verify
+with `systemctl --user status zettelkasten` — expect `active (running)`.
+
+`zts stop` should stop the process and disable it. Verify with
+`systemctl
+--user status zettelkasten` — expect `inactive (dead)` and
+`disabled`.
+
+`zts run` should run the server in the foreground; Ctrl-C should exit cleanly.
+
+After `zts start`, a reboot (or `systemctl --user daemon-reload` + manual enable
+cycle) should restart the service automatically.
