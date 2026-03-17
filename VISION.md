@@ -9,7 +9,8 @@
 
 3. Atoms may **import only other atoms from the same system** and may not import
    external libraries, built-ins, local paths, or arbitrary URLs.
-   - [x] enforced: only relative paths matching `../../xx/yy/<21chars>.ts` accepted
+   - [x] enforced: only relative paths matching `../../xx/yy/<21chars>.ts`
+         accepted
 
 4. Each atom is **immutable once accepted** and is **identified by a
    cryptographic content hash**, which serves as its canonical identity.
@@ -24,6 +25,7 @@
    - [x] submission
    - [x] retrieval
    - [x] bundle endpoint
+   - [ ] /health endpoint
    - [ ] discovery
    - [ ] testing
    - [ ] execution planning
@@ -75,8 +77,8 @@
 12. Validation enforces constraints such as **exactly one value export,
     restricted imports, absence of obvious singleton patterns, and limits on
     size or complexity**. Additional **type-only exports are permitted** (e.g.
-    `export type Cap = ...`). All exports must be **named**;
-    `export default` is forbidden.
+    `export type Cap = ...`). All exports must be **named**; `export default` is
+    forbidden.
     - [x] exactly one value export
     - [x] restricted imports
     - [x] gzip size limit (768 bytes)
