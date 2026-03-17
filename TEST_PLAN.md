@@ -82,7 +82,22 @@ Run `zts exec <hash>` — expect `exec ok` printed to stdout.
 Post an atom whose single export is not named `main`. Run `zts exec <hash>` —
 expect an error message and non-zero exit.
 
-## 9. Daemon lifecycle
+## 9. Bundle subcommand
+
+Post a root atom (with a `main` function) and any dependency atoms.
+
+`zts bundle <hash> > out.zip` — expect a valid ZIP file containing:
+
+- `<hash8>/run.ts` with
+  `import { main } from "./a/..."; await main(globalThis);`
+- `<hash8>/a/<path>.ts` for the root atom and every transitive dependency
+
+`zts exec out.zip` — expect the same output as `zts exec <hash>` (offline).
+
+Verify the ZIP uses STORE compression (no deflate): `unzip -v out.zip` should
+show `Stored` for every entry.
+
+## 10. Daemon lifecycle
 
 `zts start` should write a systemd user unit, enable it, and start it. Verify
 with `systemctl --user status zettelkasten` — expect `active (running)`.

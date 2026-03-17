@@ -32,6 +32,10 @@
       "bin": true
     }
   },
+  "remote": {
+    "http://localhost:8000/a/1h/4q/hkutdkkdv2vmeumz5fqcz.ts": "6ad3f233f9c88863048dcfd65afab4912c44dad157982e00295d9a151cd91ff7",
+    "http://localhost:8000/a/24/0o/q5t5s609pgevf7u33sn43.ts": "e691240d258df1b735059ca13d0774bfeb01338bf9f25b5f6ac477d2bd656ccc"
+  },
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@1",

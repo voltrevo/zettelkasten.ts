@@ -1,29 +1,37 @@
 1. The system is a software construction environment built from **immutable
-   TypeScript atoms** stored in a **content-addressed flat corpus**. ✓ _corpus
-   exists; immutability enforced by server (duplicate posts are no-ops)_
+   TypeScript atoms** stored in a **content-addressed flat corpus**.
+   - [x] corpus exists
+   - [x] immutability enforced (duplicate posts are no-ops)
 
 2. Each atom is a **single TypeScript module exporting exactly one symbol**
-   (function, class, type, constant, or factory). ✓ _enforced at submission_
+   (function, class, type, constant, or factory).
+   - [x] enforced at submission
 
 3. Atoms may **import only other atoms from the same system** and may not import
-   external libraries, built-ins, local paths, or arbitrary URLs. ✓ _enforced:
-   only relative paths matching `../../xx/yy/<21chars>.ts` accepted_
+   external libraries, built-ins, local paths, or arbitrary URLs.
+   - [x] enforced: only relative paths matching `../../xx/yy/<21chars>.ts` accepted
 
 4. Each atom is **immutable once accepted** and is **identified by a
-   cryptographic content hash**, which serves as its canonical identity. ✓
-   _keccak-256 (128+ bits), base36, 25 chars_
+   cryptographic content hash**, which serves as its canonical identity.
+   - [x] keccak-256 (128+ bits), base36, 25 chars
 
 5. The logical codebase is a **flat collection of atoms with no directory
    hierarchy**; physical filesystem layout is only an implementation detail.
 
 6. A **Deno web server is the primary operational interface**, providing APIs
    for submission, validation, retrieval, discovery, testing, execution
-   planning, and graph inspection. ~ _submission and retrieval implemented;
-   remainder not yet_
+   planning, and graph inspection.
+   - [x] submission
+   - [x] retrieval
+   - [x] bundle endpoint
+   - [ ] discovery
+   - [ ] testing
+   - [ ] execution planning
+   - [ ] graph inspection
 
 7. A **Git repository acts only as durable backing storage and audit history**,
-   not as the operational interface. ✓ _each new atom committed with
-   `<hash8>: <message>`_
+   not as the operational interface.
+   - [x] each new atom committed with `<hash8>: <message>`
 
 8. Atoms must **not contain hidden shared state**, including exported
    singletons, mutable top-level variables, or static caches.
@@ -57,25 +65,36 @@
 
 11. Atom submission goes through a **server validation pipeline** including
     parsing, normalization, hashing, static analysis, metadata extraction, and
-    storage. ~ _hashing, storage, and static analysis implemented; normalization
-    and metadata not yet_
+    storage.
+    - [x] hashing
+    - [x] storage
+    - [x] static analysis
+    - [ ] normalization
+    - [ ] metadata extraction
 
 12. Validation enforces constraints such as **exactly one value export,
     restricted imports, absence of obvious singleton patterns, and limits on
     size or complexity**. Additional **type-only exports are permitted** (e.g.
     `export type Cap = ...`). All exports must be **named**;
-    `export
-    default` is forbidden. ~ _one value export, restricted imports,
-    gzip size limit (768 bytes), and type-only export allowance enforced;
-    default export rejection, singleton patterns, and complexity limits not yet_
+    `export default` is forbidden.
+    - [x] exactly one value export
+    - [x] restricted imports
+    - [x] gzip size limit (768 bytes)
+    - [x] type-only export allowance
+    - [ ] default export rejection
+    - [ ] singleton pattern detection
+    - [ ] complexity limits
 
 13. Static analysis heuristics detect patterns such as **exported mutable
     variables, top-level mutation, static mutable fields, or implicit caches**.
-    ~ _exported mutable variables (`let`) rejected; top-level mutation, static
-    mutable fields, implicit caches not yet_
+    - [x] exported mutable variables (`let`) rejected
+    - [ ] top-level mutation detection
+    - [ ] static mutable fields detection
+    - [ ] implicit cache detection
 
 14. Atoms are stored in **content-addressed files named by hash**, sharded as
-    `<2chars>/<2chars>/<remainder>.ts`. ✓
+    `<2chars>/<2chars>/<remainder>.ts`.
+    - [x] implemented
 
 15. A **relational database tracks atoms, tests, relationships, problems, and
     optional metadata**.
@@ -111,11 +130,16 @@
 
 25. Execution occurs by assembling a **dependency graph of atom imports plus
     concrete implementations of external capability interfaces**. The CLI serves
-    as the **universal entry point**: `zts exec <hash>` dynamically imports the
-    root atom and calls `main(globalThis)`; the root atom is responsible for
-    assembling capabilities for its dependency graph. Root atoms must export
-    their entry function as **`main`**. ~ _`zts exec` implemented; graph safety
-    checks not yet_
+    as the **universal entry point**: `zts exec <hash> [args...]` spawns
+    `run.ts` in a fresh process, which imports the root atom and calls
+    `main(globalThis)`; extra args are forwarded and visible as `Deno.args`.
+    `zts exec <file.zip>` runs a local bundle instead. `zts bundle <hash>`
+    downloads a store-only ZIP containing all transitive atoms and a `run.ts`
+    entry point.
+    - [x] `zts exec <hash> [args...]`
+    - [x] `zts exec <file.zip>`
+    - [x] `zts bundle <hash>` — store-only ZIP with `run.ts` entry point
+    - [ ] graph safety checks before execution
 
 26. Atoms are **imported directly via Deno URL imports**, e.g.
     `https://atom-server/a/xy/zw/<remainder>.ts`.

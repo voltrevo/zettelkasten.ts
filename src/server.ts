@@ -1,5 +1,10 @@
+import { brotliCompress, constants } from "node:zlib";
+import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
+import { bundleZip } from "./bundle.ts";
 import { validateAtom } from "./validate.ts";
+
+const brotliCompressP = promisify(brotliCompress);
 
 export const STORAGE_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
 export const PORT = 8000;
@@ -129,6 +134,50 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
+  // GET /bundle/<hash> — zip of atom and all transitive dependencies
+  if (req.method === "GET") {
+    const bundleMatch = path.match(/^\/bundle\/([a-z0-9]{25})$/);
+    if (bundleMatch) {
+      const hash = bundleMatch[1];
+      let zip: Uint8Array;
+      try {
+        zip = await bundleZip(
+          hash,
+          (h) => Deno.readTextFile(hashToFilePath(h)),
+        );
+      } catch (e) {
+        return new Response((e as Error).message, { status: 404 });
+      }
+      const accept = req.headers.get("accept-encoding") ?? "";
+      if (accept.includes("br")) {
+        const compressed = await brotliCompressP(zip, {
+          params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
+        }) as Uint8Array;
+        const compressedBuf = compressed.buffer.slice(
+          compressed.byteOffset,
+          compressed.byteOffset + compressed.byteLength,
+        );
+        return new Response(new Blob([compressedBuf as ArrayBuffer]), {
+          headers: {
+            "content-type": "application/zip",
+            "content-encoding": "br",
+            "content-disposition": `attachment; filename="${
+              hash.slice(0, 8)
+            }.zip"`,
+          },
+        });
+      }
+      return new Response(new Blob([zip.buffer as ArrayBuffer]), {
+        headers: {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="${
+            hash.slice(0, 8)
+          }.zip"`,
+        },
+      });
+    }
+  }
+
   return new Response("Not found", { status: 404 });
 }
 
@@ -141,5 +190,8 @@ export async function serve(): Promise<void> {
   );
   console.log(
     "  GET  /a/<aa>/<bb>/<rest>.ts    — retrieve code by content address",
+  );
+  console.log(
+    "  GET  /bundle/<hash>            — download zip bundle of atom + dependencies",
   );
 }

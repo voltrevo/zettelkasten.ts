@@ -1,4 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
+import { parseZip } from "./src/bundle.ts";
 import { PORT, serve, STORAGE_DIR } from "./src/server.ts";
 
 const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
@@ -12,11 +13,12 @@ const LOGROTATE_CONF = `${STORAGE_DIR}/logrotate.conf`;
 const LOGROTATE_STATE = `${STORAGE_DIR}/logrotate.status`;
 
 const args = parseArgs(Deno.args, {
-  string: ["m", "n"],
+  string: ["m", "n", "o"],
   boolean: ["f"],
-  alias: { m: "message", f: "follow", n: "lines" },
+  alias: { m: "message", f: "follow", n: "lines", o: "output" },
 });
 
+const RUN_TS = new URL("./run.ts", import.meta.url).pathname;
 const [command, ...rest] = args._ as string[];
 
 switch (command) {
@@ -52,6 +54,10 @@ switch (command) {
     await cmdExec(rest);
     break;
 
+  case "bundle":
+    await cmdBundle(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -70,7 +76,10 @@ switch (command) {
       "  post -m <message> [file]     store code (stdin if no file)",
     );
     console.error(
-      "  exec <hash>                  execute root atom's main(globalThis)",
+      "  exec <hash|file.zip>         execute root atom's main(globalThis)",
+    );
+    console.error(
+      "  bundle <hash> [-o <dir>]     download zip bundle (or extract to dir)",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -224,21 +233,85 @@ async function cmdPost(rest: string[]): Promise<void> {
   console.log((await res.text()).trim());
 }
 
+async function spawnRun(
+  scriptPath: string,
+  atomUrl: string,
+  ...scriptArgs: string[]
+): Promise<void> {
+  const proc = new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-all", scriptPath, ...scriptArgs],
+    env: { ...Deno.env.toObject(), ZTS_EXEC_URL: atomUrl },
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
+  });
+  const { code } = await proc.output();
+  if (code !== 0) Deno.exit(code);
+}
+
 async function cmdExec(rest: string[]): Promise<void> {
+  const ref = rest[0];
+  if (!ref) {
+    console.error("usage: zts exec <hash|file.zip>");
+    Deno.exit(1);
+  }
+
+  if (ref.endsWith(".zip")) {
+    await execBundle(ref);
+  } else {
+    const url = `${BASE_URL}/a/${ref.slice(0, 2)}/${ref.slice(2, 4)}/${
+      ref.slice(4)
+    }.ts`;
+    await spawnRun(RUN_TS, url, ...rest.slice(1));
+  }
+}
+
+async function execBundle(zipFile: string): Promise<void> {
+  const zipData = await Deno.readFile(zipFile);
+  const files = parseZip(zipData);
+
+  const tmpDir = await Deno.makeTempDir({ prefix: "zts-" });
+  try {
+    for (const [path, data] of files) {
+      const fullPath = `${tmpDir}/${path}`;
+      await Deno.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
+      await Deno.writeFile(fullPath, data);
+    }
+
+    const runTsRel = [...files.keys()].find((p) => p.endsWith("/run.ts"));
+    if (!runTsRel) {
+      console.error("error: bundle has no run.ts entry point");
+      Deno.exit(1);
+    }
+
+    await spawnRun(`${tmpDir}/${runTsRel}`, "");
+  } finally {
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+}
+
+async function cmdBundle(rest: string[]): Promise<void> {
   const hash = rest[0];
   if (!hash) {
-    console.error("usage: zts exec <hash>");
+    console.error("usage: zts bundle <hash> [-o <dir>]");
     Deno.exit(1);
   }
-  const url = `${BASE_URL}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
-    hash.slice(4)
-  }.ts`;
-  const mod = await import(url);
-  if (typeof mod.main !== "function") {
-    console.error("error: atom does not export a 'main' function");
+  const res = await fetch(`${BASE_URL}/bundle/${hash}`);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
     Deno.exit(1);
   }
-  await mod.main(globalThis);
+  const outDir = args.o;
+  if (outDir) {
+    const zip = parseZip(await readAll(res.body!));
+    for (const [path, data] of zip) {
+      const fullPath = `${outDir}/${path}`;
+      await Deno.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
+      await Deno.writeFile(fullPath, data);
+    }
+  } else {
+    await res.body!.pipeTo(Deno.stdout.writable);
+  }
 }
 
 async function readAll(
