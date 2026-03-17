@@ -31,8 +31,11 @@ deno task zts log [-f]
 
 ```
 POST /a                              store atom (X-Commit-Message header required)
+                                     optional X-Require-Tests: hash1,hash2,...
+                                     runs tests before committing; auto-registers relationships
                                      returns /a/xx/yy/<rest>.ts on success
 GET  /a/<aa>/<bb>/<rest>.ts          retrieve atom by content address
+DELETE /a/<hash>                     delete orphan atom (409 if has relationships)
 GET  /bundle/<hash>                  download ZIP of atom + all transitive deps
 GET  /search?q=<text>[&k=10]        semantic nearest-neighbor search (requires Ollama)
 POST /relationships                  add a relationship between two atoms
@@ -97,6 +100,10 @@ server.ts for conversions.
 deno task zts post -m "brief description" /tmp/myatom.ts
 # → /a/xx/yy/<rest>.ts   (201 = new, 200 = already existed)
 
+# Post with test gate (tests must pass before atom is stored):
+deno task zts post -m "description" -t "<test-hash1>,<test-hash2>" /tmp/myatom.ts
+# → 201 if tests pass (relationships auto-registered), 422 if tests fail
+
 # The hash is: xxyy<rest>
 # Reference from another atom:
 import { myFn } from "../../xx/yy/<rest>.ts";
@@ -110,6 +117,10 @@ deno task zts exec <hash> [args...]
 # Bundle to directory:
 deno task zts bundle <hash> -o <parent-dir>
 # extracts to <parent-dir>/<hash8>/run.ts + <parent-dir>/<hash8>/a/...
+
+# Delete an orphan atom (no relationships):
+deno task zts delete <hash>
+# → 204 if deleted, 409 if has relationships, 404 if not found
 ```
 
 To make an atom searchable, post a description after submitting it:
@@ -120,6 +131,18 @@ deno task zts describe <hash> -m "<description>"
 
 Commit message in `x-commit-message` / `-m` must be **ASCII only** — Unicode
 characters (e.g. `φ`) cause a ByteString error in the HTTP header.
+
+The server validates atoms before storing (export count, import paths, size
+limit after minification). Just post and let the server reject — don't try to
+pre-check size yourself. Write clean, readable code; the server minifies before
+the size check so manual minification gains nothing and hurts readability. Never
+remove comments, shorten names, or compress formatting to meet the size limit —
+only split at natural atom boundaries.
+
+When building a multi-atom dependency tree, test leaves first before building on
+them. A passing test on a leaf atom gives confidence to rely on it in
+higher-level atoms. Discovering a bug in a leaf after the whole tree is built
+means the entire tree may be suspect.
 
 ## Writing atom descriptions (for search)
 
@@ -215,6 +238,45 @@ zts test <target-hash>
 
 Fetches all registered test hashes from the server, then spawns a local
 `deno test` process importing each test atom from the server.
+
+## TDD process for building atom trees
+
+Use this process when building a tree of atoms with test coverage:
+
+```
+NEEDS="/tmp/name-$(date +%s)-needs.txt"
+echo "<top-level goal>" > "$NEEDS"
+
+loop:
+  CURRENT=$(tail -1 "$NEEDS")
+
+  # --- first visit: design and draft ---
+  If this is a new need (no draft yet):
+    1. Design the atom's interface (what it exports, what deps it needs)
+    2. Search corpus for existing atoms that satisfy dependencies
+    3. Write test atoms FIRST — post them normally (tests don't import target)
+    4. Write the implementation atom (save draft to /tmp/)
+    5. If some deps are hypothetical:
+       - Append missing dep names to $NEEDS
+       - Continue loop (picks up deepest need next via tail -1)
+
+  # --- deps satisfied: post and finish ---
+  Post with test gate: zts post -m "desc" -t "<test1>,<test2>" /tmp/draft.ts
+  - On 201: pop $CURRENT from needs file, add description
+  - On 422: fix atom, retry
+
+  Cleanup: if a test is bad, zts delete <test-hash>
+  (409 means it's in use — just leave it)
+```
+
+Key properties:
+
+- **Stack-driven**: `tail -1` = depth-first, naturally reaches leaves first
+- **Tests before code**: test atoms don't import the target, so they can exist
+  before it does
+- **Atomic quality gate**: conditional post = atom only enters corpus if tests
+  pass; relationships auto-registered on success
+- **Self-healing**: bad tests get cleaned up; failed posts don't pollute git
 
 ## What is not yet implemented
 

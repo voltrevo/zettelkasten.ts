@@ -13,9 +13,9 @@ const LOGROTATE_CONF = `${STORAGE_DIR}/logrotate.conf`;
 const LOGROTATE_STATE = `${STORAGE_DIR}/logrotate.status`;
 
 const args = parseArgs(Deno.args, {
-  string: ["m", "n", "o", "k"],
+  string: ["m", "n", "o", "k", "t"],
   boolean: ["f"],
-  alias: { m: "message", f: "follow", n: "lines", o: "output" },
+  alias: { m: "message", f: "follow", n: "lines", o: "output", t: "tests" },
 });
 
 const RUN_TS = new URL("./run.ts", import.meta.url).pathname;
@@ -71,6 +71,10 @@ switch (command) {
     await cmdTest(rest);
     break;
 
+  case "delete":
+    await cmdDelete(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -86,7 +90,7 @@ switch (command) {
       "  get <path|hash>              retrieve code by content address",
     );
     console.error(
-      "  post -m <message> [file]     store code (stdin if no file)",
+      "  post -m <msg> [-t <tests>] [file]  store code, optionally gated on tests",
     );
     console.error(
       "  exec <hash|file.zip>         execute root atom's main(globalThis)",
@@ -102,6 +106,9 @@ switch (command) {
     );
     console.error(
       "  test <hash>                  run all registered tests for an atom",
+    );
+    console.error(
+      "  delete <hash>                delete an orphan atom (no relationships)",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -244,7 +251,7 @@ async function cmdGet(rest: string[]): Promise<void> {
 async function cmdPost(rest: string[]): Promise<void> {
   const message = args.m;
   if (!message) {
-    console.error("usage: zts post -m <message> [file]");
+    console.error("usage: zts post -m <message> [-t <test1,test2,...>] [file]");
     Deno.exit(1);
   }
   const file = rest[0];
@@ -257,9 +264,14 @@ async function cmdPost(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
 
+  const headers: Record<string, string> = { "x-commit-message": message };
+  if (args.t) {
+    headers["x-require-tests"] = args.t;
+  }
+
   const res = await fetch(`${BASE_URL}/a`, {
     method: "POST",
-    headers: { "x-commit-message": message },
+    headers,
     body: content,
   });
   if (!res.ok) {
@@ -267,6 +279,27 @@ async function cmdPost(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
   console.log((await res.text()).trim());
+}
+
+async function cmdDelete(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts delete <hash>");
+    Deno.exit(1);
+  }
+  const res = await fetch(`${BASE_URL}/a/${hash}`, { method: "DELETE" });
+  if (res.status === 204) {
+    console.log("deleted");
+  } else if (res.status === 409) {
+    console.error(`error: ${await res.text()}`);
+    Deno.exit(1);
+  } else if (res.status === 404) {
+    console.error("error: atom not found");
+    Deno.exit(1);
+  } else {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
 }
 
 async function spawnRun(

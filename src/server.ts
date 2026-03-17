@@ -23,9 +23,53 @@ const EMBED_DIM = parseInt(Deno.env.get("ZTS_EMBED_DIM") ?? "768");
 const KNOWN_RELATIONSHIP_KINDS = new Set(["tests"]);
 const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
 
+const TEST_TIMEOUT_MS = 2000;
+
 let embedStore: EmbeddingStore;
 let hnswIndex: HnswIndex;
 let relStore: RelationshipStore;
+
+/** Run test atoms against a target. Returns null on success, or an error Response. */
+async function runTests(
+  testHashes: string[],
+  targetHash: string,
+): Promise<Response | null> {
+  const serverUrl = `http://localhost:${PORT}`;
+  const proc = new Deno.Command(Deno.execPath(), {
+    args: [
+      "test",
+      `--allow-import=localhost:${PORT}`,
+      "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
+      "--no-lock",
+      TEST_RUNNER,
+    ],
+    env: {
+      ZTS_SERVER_URL: serverUrl,
+      ZTS_TARGET: targetHash,
+      ZTS_TESTS: testHashes.join(","),
+    },
+    stdout: "piped",
+    stderr: "piped",
+  });
+  let output: Deno.CommandOutput;
+  try {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Test timed out after ${TEST_TIMEOUT_MS}ms`)),
+        TEST_TIMEOUT_MS,
+      )
+    );
+    output = await Promise.race([proc.output(), timeout]);
+  } catch (e) {
+    return new Response((e as Error).message, { status: 422 });
+  }
+  if (output.code !== 0) {
+    const text = new TextDecoder().decode(output.stdout) +
+      new TextDecoder().decode(output.stderr);
+    return new Response(text, { status: 422 });
+  }
+  return null;
+}
 
 async function git(...args: string[]): Promise<string> {
   const cmd = new Deno.Command("git", {
@@ -140,11 +184,45 @@ async function route(req: Request): Promise<Response> {
     await Deno.mkdir(filePath.replace(/\/[^/]+$/, ""), { recursive: true });
     await Deno.writeTextFile(filePath, content);
 
-    await git(
-      "add",
-      `a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`,
-    );
+    // Optional: run tests before committing
+    const requireTests = req.headers.get("x-require-tests");
+    if (requireTests) {
+      const testHashes = requireTests.split(",").map((s) => s.trim()).filter(
+        Boolean,
+      );
+      for (const th of testHashes) {
+        if (!/^[a-z0-9]{25}$/.test(th)) {
+          await Deno.remove(filePath);
+          return new Response(`Invalid test hash: ${th}`, { status: 400 });
+        }
+        try {
+          await Deno.stat(hashToFilePath(th));
+        } catch {
+          await Deno.remove(filePath);
+          return new Response(`Test atom not found: ${th}`, { status: 404 });
+        }
+      }
+      const fail = await runTests(testHashes, hash);
+      if (fail) {
+        await Deno.remove(filePath);
+        return fail;
+      }
+    }
+
+    const relPath = `a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
+      hash.slice(4)
+    }.ts`;
+    await git("add", relPath);
     await git("commit", "-m", `${hash.slice(0, 8)}: ${message}`);
+
+    // Auto-register test relationships on success
+    if (requireTests) {
+      for (
+        const th of requireTests.split(",").map((s) => s.trim()).filter(Boolean)
+      ) {
+        relStore.insert(th, "tests", hash);
+      }
+    }
 
     return new Response(`${urlPath}\n`, {
       status: 201,
@@ -303,37 +381,8 @@ async function route(req: Request): Promise<Response> {
     }
 
     if (kind === "tests") {
-      const serverUrl = `http://localhost:${PORT}`;
-      const proc = new Deno.Command(Deno.execPath(), {
-        args: [
-          "test",
-          `--allow-import=localhost:${PORT}`,
-          "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
-          "--no-lock",
-          TEST_RUNNER,
-        ],
-        env: {
-          ZTS_SERVER_URL: serverUrl,
-          ZTS_TARGET: to,
-          ZTS_TESTS: from,
-        },
-        stdout: "piped",
-        stderr: "piped",
-      });
-      let output: Deno.CommandOutput;
-      try {
-        const timeout = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Test timed out after 2s")), 2000)
-        );
-        output = await Promise.race([proc.output(), timeout]);
-      } catch (e) {
-        return new Response((e as Error).message, { status: 422 });
-      }
-      if (output.code !== 0) {
-        const text = new TextDecoder().decode(output.stdout) +
-          new TextDecoder().decode(output.stderr);
-        return new Response(text, { status: 422 });
-      }
+      const fail = await runTests([from], to);
+      if (fail) return fail;
     }
 
     const isNew = relStore.insert(from, kind, to);
@@ -358,6 +407,41 @@ async function route(req: Request): Promise<Response> {
     const deleted = relStore.delete(from, kind, to);
     if (!deleted) return new Response("Not found", { status: 404 });
     return new Response("ok\n", { headers: { "content-type": "text/plain" } });
+  }
+
+  // DELETE /a/<hash> — delete an orphan atom (no relationships)
+  if (req.method === "DELETE") {
+    const delMatch = path.match(/^\/a\/([a-z0-9]{25})$/);
+    if (delMatch) {
+      const hash = delMatch[1];
+      const filePath = hashToFilePath(hash);
+      try {
+        await Deno.stat(filePath);
+      } catch {
+        return new Response("Not found", { status: 404 });
+      }
+      const outgoing = relStore.query({ from: hash });
+      if (outgoing.length > 0) {
+        return new Response(
+          `Has ${outgoing.length} outgoing relationship(s)`,
+          { status: 409 },
+        );
+      }
+      const incoming = relStore.query({ to: hash });
+      if (incoming.length > 0) {
+        return new Response(
+          `Has ${incoming.length} incoming relationship(s)`,
+          { status: 409 },
+        );
+      }
+      await Deno.remove(filePath);
+      const relPath = `a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
+        hash.slice(4)
+      }.ts`;
+      await git("add", relPath);
+      await git("commit", "-m", `${hash.slice(0, 8)}: delete orphan`);
+      return new Response(null, { status: 204 });
+    }
   }
 
   // GET /relationships?from=&to=&kind= — query relationships

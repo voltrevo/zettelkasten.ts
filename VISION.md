@@ -209,4 +209,10 @@
     semantic embeddings**, optimized for **AI-assisted development and
     discovery**.
 
+## TODO
+
+- [ ] Revise CLI/server responsibility split. The server needs to be secure —
+      prefer running code (tests, exec) on the CLI side rather than in the
+      server process.
+
 suggest an implementation order for the properties above
