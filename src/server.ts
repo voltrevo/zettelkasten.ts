@@ -1,7 +1,7 @@
 import { brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
-import { bundleZip } from "./bundle.ts";
+import { bundleZip, extractDependencies } from "./bundle.ts";
 import { EmbeddingStore, RelationshipStore } from "./db.ts";
 import type { Relationship } from "./db.ts";
 import {
@@ -67,6 +67,47 @@ async function runTests(
     const text = new TextDecoder().decode(output.stdout) +
       new TextDecoder().decode(output.stderr);
     return new Response(text, { status: 422 });
+  }
+  return null;
+}
+
+/** Walk transitive deps of content; return error Response if any lack tests or description. */
+async function checkDepsTestedAndDescribed(
+  content: string,
+): Promise<Response | null> {
+  const visited = new Set<string>();
+  const queue = extractDependencies(content);
+  const untested: string[] = [];
+  const undescribed: string[] = [];
+
+  while (queue.length > 0) {
+    const dep = queue.shift()!;
+    if (visited.has(dep)) continue;
+    visited.add(dep);
+
+    const tests = relStore.query({ to: dep, kind: "tests" });
+    if (tests.length === 0) untested.push(dep);
+
+    if (!embedStore.hasHash(dep)) undescribed.push(dep);
+
+    // Walk deeper
+    try {
+      const depContent = await Deno.readTextFile(hashToFilePath(dep));
+      for (const sub of extractDependencies(depContent)) {
+        if (!visited.has(sub)) queue.push(sub);
+      }
+    } catch { /* dep file missing — validateAtom already checks imports */ }
+  }
+
+  const issues: string[] = [];
+  if (untested.length > 0) {
+    issues.push(`Untested deps: ${untested.join(", ")}`);
+  }
+  if (undescribed.length > 0) {
+    issues.push(`Undescribed deps: ${undescribed.join(", ")}`);
+  }
+  if (issues.length > 0) {
+    return new Response(issues.join("\n"), { status: 422 });
   }
   return null;
 }
@@ -206,6 +247,13 @@ async function route(req: Request): Promise<Response> {
       if (fail) {
         await Deno.remove(filePath);
         return fail;
+      }
+
+      // Verify all transitive deps are tested and described
+      const depCheck = await checkDepsTestedAndDescribed(content);
+      if (depCheck) {
+        await Deno.remove(filePath);
+        return depCheck;
       }
     }
 
