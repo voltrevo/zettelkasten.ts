@@ -13,7 +13,7 @@
   },
   "lock": {
     "frozen": false,
-    "exclude": ["http://localhost"]
+    "exclude": ["http://localhost:8000"]
   },
   "tasks": {
     "zts": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-import main.ts",

@@ -239,7 +239,7 @@ async function spawnRun(
   ...scriptArgs: string[]
 ): Promise<void> {
   const proc = new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-all", scriptPath, ...scriptArgs],
+    args: ["run", "--allow-all", "--no-lock", scriptPath, ...scriptArgs],
     env: { ...Deno.env.toObject(), ZTS_EXEC_URL: atomUrl },
     stdout: "inherit",
     stderr: "inherit",
