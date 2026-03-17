@@ -30,11 +30,14 @@ deno task zts log [-f]
 ## Server endpoints
 
 ```
-POST /a                         store atom (X-Commit-Message header required)
-                                returns /a/xx/yy/<rest>.ts on success
-GET  /a/<aa>/<bb>/<rest>.ts     retrieve atom by content address
-GET  /bundle/<hash>             download ZIP of atom + all transitive deps
-GET  /search?q=<text>[&k=10]   semantic nearest-neighbor search (requires Ollama)
+POST /a                              store atom (X-Commit-Message header required)
+                                     returns /a/xx/yy/<rest>.ts on success
+GET  /a/<aa>/<bb>/<rest>.ts          retrieve atom by content address
+GET  /bundle/<hash>                  download ZIP of atom + all transitive deps
+GET  /search?q=<text>[&k=10]        semantic nearest-neighbor search (requires Ollama)
+POST /relationships                  add a relationship between two atoms
+DELETE /relationships                remove a relationship
+GET  /relationships?from=&to=&kind= query relationships (at least one param required)
 ```
 
 ## Atom rules (enforced at submission)
@@ -79,7 +82,7 @@ a/
   xx/          ← first 2 chars of hash
     yy/        ← next 2 chars
       <21chars>.ts
-zts.db         ← SQLite: embedding vectors (Float32Array, nomic-embed-text)
+zts.db         ← SQLite: embedding vectors + relationship graph
 server.log     ← append-only log
 ```
 
@@ -160,27 +163,68 @@ Description:
 
 ## Key source files
 
-| File              | Purpose                                                          |
-| ----------------- | ---------------------------------------------------------------- |
-| `src/server.ts`   | HTTP server: routes, atom storage, git commits, search           |
-| `src/validate.ts` | Atom validation: export count, import paths, size limit          |
-| `src/bundle.ts`   | Dependency graph walking, ZIP build/parse                        |
-| `src/minify.ts`   | Comment stripping + whitespace collapse (for size check)         |
-| `src/db.ts`       | SQLite wrapper: `hash → Float32Array` embedding storage          |
-| `src/embed.ts`    | Embedding API client (Ollama/OpenAI), cosine similarity, topK    |
-| `main.ts`         | CLI entry point: run/start/stop/log/get/post/exec/bundle         |
-| `run.ts`          | Universal exec entry point: imports root atom's `main`, calls it |
+| File                 | Purpose                                                          |
+| -------------------- | ---------------------------------------------------------------- |
+| `src/server.ts`      | HTTP server: routes, atom storage, git commits, search           |
+| `src/validate.ts`    | Atom validation: export count, import paths, size limit          |
+| `src/bundle.ts`      | Dependency graph walking, ZIP build/parse                        |
+| `src/minify.ts`      | Comment stripping + whitespace collapse (for size check)         |
+| `src/db.ts`          | SQLite wrapper: embeddings + `RelationshipStore`                 |
+| `src/embed.ts`       | Embedding API client (Ollama/OpenAI), cosine similarity, topK    |
+| `src/test-runner.ts` | Subprocess entry point for running test atoms against a target   |
+| `main.ts`            | CLI entry point: run/start/stop/log/get/post/exec/bundle/test    |
+| `run.ts`             | Universal exec entry point: imports root atom's `main`, calls it |
+
+## Writing test atoms
+
+A test atom exports a class named `Test` with a `static name` string and a
+`run(target)` method. The type of `target` should be the concrete interface the
+test requires — all linked targets must satisfy it at runtime.
+
+```typescript
+export class Test {
+  static name = "gcd: coprime inputs return their GCD";
+  run(target: (a: number, b: number) => number): void {
+    if (target(12, 8) !== 4) throw new Error("expected gcd(12,8) = 4");
+    if (target(7, 13) !== 1) throw new Error("expected gcd(7,13) = 1");
+  }
+}
+```
+
+Rules:
+
+- The value export must be named exactly `Test` (the runner imports it by name)
+- No constructor arguments — the test creates its own mocks internally
+- No real I/O; the test subprocess runs with `--allow-import=<server>` only
+
+### Registering a test relationship
+
+```sh
+# POST /relationships runs the test before storing the relationship.
+# 201 = new, 200 = already registered, 422 = test failed.
+curl -s -X POST http://localhost:8000/relationships \
+  -H "content-type: application/json" \
+  -d '{"kind":"tests","from":"<test-hash>","to":"<target-hash>"}'
+```
+
+### Running tests for an atom
+
+```sh
+zts test <target-hash>
+```
+
+Fetches all registered test hashes from the server, then spawns a local
+`deno test` process importing each test atom from the server.
 
 ## What is not yet implemented
 
 From VISION.md (incomplete items):
 
-- **Full relational database** — no atoms/tests/relationships/problems tables
-  yet; only the `embeddings` table exists in `zts.db`
 - **Discovery endpoints** — no `/list`, no tag-based or relationship-based
   search
 - **Graph inspection** — no reverse-dependency queries, no `/graph` endpoint
-- **Tests as first-class artifacts** — no `/tests` endpoint, no test recording
+- **Test result history** — pass/fail relationship exists but no per-run timing
+  or history
 - **Metadata extraction** — export names/types not indexed beyond the embedding
 - **Normalization** — atoms stored verbatim, no canonical formatting enforced
 - **Execution planning / graph safety checks** — `zts exec` runs without

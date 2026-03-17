@@ -2,7 +2,8 @@ import { brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bundleZip } from "./bundle.ts";
-import { EmbeddingStore } from "./db.ts";
+import { EmbeddingStore, RelationshipStore } from "./db.ts";
+import type { Relationship } from "./db.ts";
 import {
   checkEmbeddingService,
   defaultEmbedConfig,
@@ -19,8 +20,12 @@ export const PORT = 8000;
 const embedConfig = defaultEmbedConfig();
 const EMBED_DIM = parseInt(Deno.env.get("ZTS_EMBED_DIM") ?? "768");
 
+const KNOWN_RELATIONSHIP_KINDS = new Set(["tests"]);
+const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
+
 let embedStore: EmbeddingStore;
 let hnswIndex: HnswIndex;
+let relStore: RelationshipStore;
 
 async function git(...args: string[]): Promise<string> {
   const cmd = new Deno.Command("git", {
@@ -263,6 +268,114 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
+  // POST /relationships — add a relationship between two atoms
+  if (req.method === "POST" && path === "/relationships") {
+    let body: { kind?: string; from?: string; to?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    const { kind, from, to } = body;
+    if (!kind || !from || !to) {
+      return new Response("Missing kind, from, or to", { status: 400 });
+    }
+    if (!KNOWN_RELATIONSHIP_KINDS.has(kind)) {
+      return new Response(
+        `Unknown relationship kind "${kind}". Known kinds: ${
+          [...KNOWN_RELATIONSHIP_KINDS].join(", ")
+        }`,
+        { status: 400 },
+      );
+    }
+    if (!/^[a-z0-9]{25}$/.test(from) || !/^[a-z0-9]{25}$/.test(to)) {
+      return new Response("Invalid hash format", { status: 400 });
+    }
+    try {
+      await Deno.stat(hashToFilePath(from));
+    } catch {
+      return new Response(`Atom not found: ${from}`, { status: 404 });
+    }
+    try {
+      await Deno.stat(hashToFilePath(to));
+    } catch {
+      return new Response(`Atom not found: ${to}`, { status: 404 });
+    }
+
+    if (kind === "tests") {
+      const serverUrl = `http://localhost:${PORT}`;
+      const proc = new Deno.Command(Deno.execPath(), {
+        args: [
+          "test",
+          `--allow-import=localhost:${PORT}`,
+          "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
+          "--no-lock",
+          TEST_RUNNER,
+        ],
+        env: {
+          ZTS_SERVER_URL: serverUrl,
+          ZTS_TARGET: to,
+          ZTS_TESTS: from,
+        },
+        stdout: "piped",
+        stderr: "piped",
+      });
+      let output: Deno.CommandOutput;
+      try {
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Test timed out after 2s")), 2000)
+        );
+        output = await Promise.race([proc.output(), timeout]);
+      } catch (e) {
+        return new Response((e as Error).message, { status: 422 });
+      }
+      if (output.code !== 0) {
+        const text = new TextDecoder().decode(output.stdout) +
+          new TextDecoder().decode(output.stderr);
+        return new Response(text, { status: 422 });
+      }
+    }
+
+    const isNew = relStore.insert(from, kind, to);
+    return new Response("ok\n", {
+      status: isNew ? 201 : 200,
+      headers: { "content-type": "text/plain" },
+    });
+  }
+
+  // DELETE /relationships — remove a relationship
+  if (req.method === "DELETE" && path === "/relationships") {
+    let body: { kind?: string; from?: string; to?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    const { kind, from, to } = body;
+    if (!kind || !from || !to) {
+      return new Response("Missing kind, from, or to", { status: 400 });
+    }
+    const deleted = relStore.delete(from, kind, to);
+    if (!deleted) return new Response("Not found", { status: 404 });
+    return new Response("ok\n", { headers: { "content-type": "text/plain" } });
+  }
+
+  // GET /relationships?from=&to=&kind= — query relationships
+  if (req.method === "GET" && path === "/relationships") {
+    const from = url.searchParams.get("from") ?? undefined;
+    const to = url.searchParams.get("to") ?? undefined;
+    const kind = url.searchParams.get("kind") ?? undefined;
+    if (!from && !to && !kind) {
+      return new Response("At least one of from, to, kind is required", {
+        status: 400,
+      });
+    }
+    const rows: Relationship[] = relStore.query({ from, to, kind });
+    return new Response(JSON.stringify(rows), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   return new Response("Not found", { status: 404 });
 }
 
@@ -270,6 +383,7 @@ export async function serve(): Promise<void> {
   await initRepo();
 
   embedStore = new EmbeddingStore(`${STORAGE_DIR}/zts.db`);
+  relStore = new RelationshipStore(`${STORAGE_DIR}/zts.db`);
   const allVecs = embedStore.getAll();
   hnswIndex = HnswIndex.create(
     EMBED_DIM,

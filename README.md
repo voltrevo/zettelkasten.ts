@@ -45,12 +45,15 @@ time `deno.json` changes to keep the CLI in sync.
 ## Server endpoints
 
 ```
-POST /a                           store atom (X-Commit-Message header required)
-GET  /a/<aa>/<bb>/<rest>.ts       retrieve atom by content address
-GET  /bundle/<hash>               download ZIP of atom + all transitive deps
-POST /a/<hash>/description        store a searchable description (requires Ollama)
-GET  /a/<hash>/description        retrieve description
-GET  /search?q=<text>[&k=10]      semantic nearest-neighbor search (requires Ollama)
+POST /a                              store atom (X-Commit-Message header required)
+GET  /a/<aa>/<bb>/<rest>.ts          retrieve atom by content address
+GET  /bundle/<hash>                  download ZIP of atom + all transitive deps
+POST /a/<hash>/description           store a searchable description (requires Ollama)
+GET  /a/<hash>/description           retrieve description
+GET  /search?q=<text>[&k=10]         semantic nearest-neighbor search (requires Ollama)
+POST /relationships                  add a relationship; runs test if kind=tests
+DELETE /relationships                remove a relationship
+GET  /relationships?from=&to=&kind=  query relationships (at least one param required)
 ```
 
 ## CLI reference
@@ -66,6 +69,7 @@ zts post -m <message> [file]      store atom (stdin if no file)
 zts get <hash>                    print atom source
 zts describe <hash> -m <text>     store searchable description
 zts search <query> [-k <n>]       semantic search, default k=10
+zts test <hash>                   run all registered tests for an atom
 zts exec <hash> [args...]         run atom's main(globalThis)
 zts bundle <hash> [-o <dir>]      download ZIP bundle (or extract to dir)
 ```
@@ -193,12 +197,82 @@ A good description covers what it computes, the meaning of inputs and outputs,
 edge cases, and any non-obvious behavior from its dependencies. Richer
 descriptions produce better search results.
 
-### 5. Test and run
+### 5. Write and register a test
+
+A test atom exports a class named `Test` with a `static name` string and a
+`run(target)` method. The type of `target` should be the concrete type the test
+requires. The test creates its own mocks — no real I/O allowed.
+
+```typescript
+// /tmp/is-prime-test.ts
+export class Test {
+  static name = "isPrime: known primes and composites";
+  run(target: (n: number) => boolean): void {
+    for (const p of [2, 3, 5, 7, 11]) {
+      if (!target(p)) throw new Error(`${p} should be prime`);
+    }
+    for (const c of [0, 1, 4, 9]) {
+      if (target(c)) throw new Error(`${c} should not be prime`);
+    }
+  }
+}
+```
+
+For atoms that take a `Cap` parameter, create a mock cap inline:
+
+```typescript
+// /tmp/test-main.ts
+type Cap = {
+  console: Pick<Console, "log" | "error">;
+  Deno: { args: readonly string[] };
+};
+export class Test {
+  static name = "fraction main: simplifies 6/8 to 3/4";
+  run(target: (cap: Cap) => void): void {
+    const out: string[] = [];
+    const cap: Cap = {
+      console: {
+        log: (s) => {
+          out.push(s);
+        },
+        error: () => {},
+      },
+      Deno: { args: ["6/8"] },
+    };
+    target(cap);
+    if (out[0] !== "3/4") throw new Error(`got "${out[0]}"`);
+  }
+}
+```
+
+Post the test atom, then register it against the target. The server runs the
+test before storing the relationship — a 422 means it failed and nothing was
+stored:
+
+```sh
+zts post -m "isPrime test" /tmp/is-prime-test.ts
+# → /a/xx/yy/<rest>.ts  (test-hash = xxyy<rest>)
+
+curl -X POST http://localhost:8000/relationships \
+  -H "content-type: application/json" \
+  -d '{"kind":"tests","from":"<test-hash>","to":"1e00ajro7glwpdy5jkv48v09e"}'
+# 201 = registered, 422 = test failed (body has test output)
+```
+
+### 6. Run registered tests
+
+```sh
+zts test 1e00ajro7glwpdy5jkv48v09e
+```
+
+Fetches all registered tests for the atom and runs them via `deno test`,
+importing atoms live from the server. Output is standard Deno test format.
+
+### 7. Execute and bundle
 
 Run an atom directly if it exports `main(cap)`:
 
 ```sh
-zts exec 1e00ajro7glwpdy5jkv48v09e   # (no main — just an example)
 zts exec 2jkr3h8zsm3c0xcgzbmbrkath 3/12
 # → 1/4
 ```

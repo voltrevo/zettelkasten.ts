@@ -67,6 +67,10 @@ switch (command) {
     await cmdSearch(rest);
     break;
 
+  case "test":
+    await cmdTest(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -96,6 +100,9 @@ switch (command) {
     console.error(
       "  search <query> [-k <n>]      semantic search (default k=10)",
     );
+    console.error(
+      "  test <hash>                  run all registered tests for an atom",
+    );
     Deno.exit(command ? 1 : 0);
 }
 
@@ -120,7 +127,7 @@ async function daemonInstall(): Promise<void> {
     "",
     "[Service]",
     `WorkingDirectory=${projectDir}`,
-    `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=git --allow-ffi ${scriptPath} run`,
+    `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=git,${denoExec} --allow-ffi ${scriptPath} run`,
     `StandardOutput=append:${LOG_FILE}`,
     `StandardError=append:${LOG_FILE}`,
     "Restart=on-failure",
@@ -394,6 +401,51 @@ async function cmdSearch(rest: string[]): Promise<void> {
     const score = hit.score.toFixed(3);
     console.log(`${hit.hash}  ${score}  ${hit.description}`);
   }
+}
+
+async function cmdTest(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts test <hash>");
+    Deno.exit(1);
+  }
+  const url = new URL(`${BASE_URL}/relationships`);
+  url.searchParams.set("to", hash);
+  url.searchParams.set("kind", "tests");
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const rels = await res.json() as Array<
+    { from: string; kind: string; to: string }
+  >;
+  if (rels.length === 0) {
+    console.log("no tests registered for " + hash);
+    return;
+  }
+  const testHashes = rels.map((r) => r.from);
+  const serverHost = new URL(BASE_URL).host;
+  const runnerPath = new URL("./src/test-runner.ts", import.meta.url).pathname;
+  const proc = new Deno.Command(Deno.execPath(), {
+    args: [
+      "test",
+      `--allow-import=${serverHost}`,
+      "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
+      "--no-lock",
+      runnerPath,
+    ],
+    env: {
+      ...Deno.env.toObject(),
+      ZTS_SERVER_URL: BASE_URL,
+      ZTS_TARGET: hash,
+      ZTS_TESTS: testHashes.join(","),
+    },
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const { code } = await proc.output();
+  Deno.exit(code);
 }
 
 async function readAll(

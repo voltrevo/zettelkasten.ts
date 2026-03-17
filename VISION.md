@@ -158,15 +158,23 @@
 
 28. Testing is a **first-class artifact** where tests target one or more atoms
     and execute against the real dependency graph.
+    - [x] test atoms: class `Test` with `static name` and `run(target)`
+    - [x] `POST /relationships { kind: "tests", from, to }` validates by running
+          test
 
 29. Internal atom dependencies are **not mocked in tests**; only external
     capability interfaces may be substituted.
+    - [x] test runner uses `--allow-import=<host>` only; no other permissions
 
 30. Test categories may include **behavior, property, regression, performance,
     security, and compatibility tests**.
+    - [ ] only ad-hoc via static name convention; no enforced category field yet
 
 31. Test results are **recorded and attributable**, allowing atoms to accumulate
     trust signals over time.
+    - [x] relationship existence = test passes; `DELETE /relationships` removes
+          on failure
+    - [ ] no per-run result history or timing data
 
 32. Atoms are expected to be **small and focused**, with enforceable thresholds
     on size, complexity, branching, parameters, and imports.

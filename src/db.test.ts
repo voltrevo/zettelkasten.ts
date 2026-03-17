@@ -1,5 +1,5 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
-import { EmbeddingStore } from "./db.ts";
+import { EmbeddingStore, RelationshipStore } from "./db.ts";
 
 function makeStore(): EmbeddingStore {
   return new EmbeddingStore(":memory:");
@@ -64,5 +64,67 @@ Deno.test("EmbeddingStore: upsert is idempotent", () => {
   const result = store.get("aaaaabbbbbcccccdddddeeeee");
   assertEquals(result?.description, "second");
   assertNotEquals(result?.vector[0], 1);
+  store.close();
+});
+
+// RelationshipStore tests
+
+const TEST_HASH = "aaaaabbbbbcccccdddddeeeee";
+const TARGET_HASH = "fffffggggghhhhhjjjjjkkkkk";
+const OTHER_HASH = "zzzzzbbbbbcccccdddddeeeee";
+
+function makeRelStore(): RelationshipStore {
+  return new RelationshipStore(":memory:");
+}
+
+Deno.test("RelationshipStore: insert and query round-trip", () => {
+  const store = makeRelStore();
+  const inserted = store.insert(TEST_HASH, "tests", TARGET_HASH);
+  assertEquals(inserted, true);
+  const rows = store.query({ from: TEST_HASH, kind: "tests" });
+  assertEquals(rows.length, 1);
+  assertEquals(rows[0].from, TEST_HASH);
+  assertEquals(rows[0].kind, "tests");
+  assertEquals(rows[0].to, TARGET_HASH);
+  store.close();
+});
+
+Deno.test("RelationshipStore: insert returns false on duplicate", () => {
+  const store = makeRelStore();
+  assertEquals(store.insert(TEST_HASH, "tests", TARGET_HASH), true);
+  assertEquals(store.insert(TEST_HASH, "tests", TARGET_HASH), false);
+  // only one row stored
+  assertEquals(store.query({ from: TEST_HASH }).length, 1);
+  store.close();
+});
+
+Deno.test("RelationshipStore: delete removes relationship", () => {
+  const store = makeRelStore();
+  store.insert(TEST_HASH, "tests", TARGET_HASH);
+  assertEquals(store.delete(TEST_HASH, "tests", TARGET_HASH), true);
+  assertEquals(store.query({ from: TEST_HASH }).length, 0);
+  store.close();
+});
+
+Deno.test("RelationshipStore: delete returns false when not found", () => {
+  const store = makeRelStore();
+  assertEquals(store.delete(TEST_HASH, "tests", TARGET_HASH), false);
+  store.close();
+});
+
+Deno.test("RelationshipStore: query by to", () => {
+  const store = makeRelStore();
+  store.insert(TEST_HASH, "tests", TARGET_HASH);
+  store.insert(OTHER_HASH, "tests", TARGET_HASH);
+  const rows = store.query({ to: TARGET_HASH, kind: "tests" });
+  assertEquals(rows.length, 2);
+  store.close();
+});
+
+Deno.test("RelationshipStore: query with no filter returns all rows", () => {
+  const store = makeRelStore();
+  store.insert(TEST_HASH, "tests", TARGET_HASH);
+  store.insert(OTHER_HASH, "tests", TARGET_HASH);
+  assertEquals(store.query({}).length, 2);
   store.close();
 });
