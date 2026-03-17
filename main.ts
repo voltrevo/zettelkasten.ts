@@ -13,7 +13,7 @@ const LOGROTATE_CONF = `${STORAGE_DIR}/logrotate.conf`;
 const LOGROTATE_STATE = `${STORAGE_DIR}/logrotate.status`;
 
 const args = parseArgs(Deno.args, {
-  string: ["m", "n", "o"],
+  string: ["m", "n", "o", "k"],
   boolean: ["f"],
   alias: { m: "message", f: "follow", n: "lines", o: "output" },
 });
@@ -35,6 +35,7 @@ switch (command) {
     break;
 
   case "restart":
+    await daemonInstall();
     await systemctl("restart", UNIT_NAME);
     break;
 
@@ -56,6 +57,14 @@ switch (command) {
 
   case "bundle":
     await cmdBundle(rest);
+    break;
+
+  case "describe":
+    await cmdDescribe(rest);
+    break;
+
+  case "search":
+    await cmdSearch(rest);
     break;
 
   default:
@@ -81,6 +90,12 @@ switch (command) {
     console.error(
       "  bundle <hash> [-o <dir>]     download zip bundle (or extract to dir)",
     );
+    console.error(
+      "  describe <hash> -m <text>    store a searchable description for an atom",
+    );
+    console.error(
+      "  search <query> [-k <n>]      semantic search (default k=10)",
+    );
     Deno.exit(command ? 1 : 0);
 }
 
@@ -94,16 +109,18 @@ async function systemctl(...cmd: string[]): Promise<void> {
   if (code !== 0) throw new Error(`systemctl exited with code ${code}`);
 }
 
-async function daemonStart(): Promise<void> {
+async function daemonInstall(): Promise<void> {
   const denoExec = Deno.execPath();
   const scriptPath = new URL(import.meta.url).pathname;
+  const projectDir = new URL(".", import.meta.url).pathname;
 
   const unit = [
     "[Unit]",
     "Description=Zettelkasten atom server",
     "",
     "[Service]",
-    `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=git ${scriptPath} run`,
+    `WorkingDirectory=${projectDir}`,
+    `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=git --allow-ffi ${scriptPath} run`,
     `StandardOutput=append:${LOG_FILE}`,
     `StandardError=append:${LOG_FILE}`,
     "Restart=on-failure",
@@ -158,6 +175,18 @@ async function daemonStart(): Promise<void> {
     logrotateTimer,
   );
   await systemctl("daemon-reload");
+}
+
+async function daemonStart(): Promise<void> {
+  const check = new Deno.Command("systemctl", {
+    args: ["--user", "is-active", "--quiet", UNIT_NAME],
+  });
+  const { code } = await check.output();
+  if (code === 0) {
+    console.error("error: service is already running (use 'zts restart')");
+    Deno.exit(1);
+  }
+  await daemonInstall();
   await systemctl("enable", "--now", UNIT_NAME);
   await systemctl("enable", "--now", `${LOGROTATE_UNIT}.timer`);
   console.log("Service enabled and started.");
@@ -311,6 +340,59 @@ async function cmdBundle(rest: string[]): Promise<void> {
     }
   } else {
     await res.body!.pipeTo(Deno.stdout.writable);
+  }
+}
+
+async function cmdDescribe(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  const description = args.m;
+  if (!hash || !description) {
+    console.error("usage: zts describe <hash> -m <description>");
+    Deno.exit(1);
+  }
+  const res = await fetch(
+    `${BASE_URL}/a/${hash}/description`,
+    {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: description,
+    },
+  );
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  console.log("ok");
+}
+
+async function cmdSearch(rest: string[]): Promise<void> {
+  const query = rest.join(" ").trim();
+  if (!query) {
+    console.error("usage: zts search <query> [-k <n>]");
+    Deno.exit(1);
+  }
+  const k = args.k ?? "10";
+  const url = new URL(`${BASE_URL}/search`);
+  url.searchParams.set("q", query);
+  url.searchParams.set("k", k);
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const hits = await res.json() as Array<{
+    hash: string;
+    score: number;
+    url: string;
+    description: string;
+  }>;
+  if (hits.length === 0) {
+    console.log("no results");
+    return;
+  }
+  for (const hit of hits) {
+    const score = hit.score.toFixed(3);
+    console.log(`${hit.hash}  ${score}  ${hit.description}`);
   }
 }
 

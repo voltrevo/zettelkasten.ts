@@ -113,9 +113,16 @@
 
 19. The system maintains **embeddings for atoms** to support semantic search and
     related-code discovery.
+    - [x] SQLite-backed embedding store (`zts.db`)
+    - [x] in-memory flat vector index (cosine similarity, loaded at startup)
+    - [x] `POST /a/<hash>/description` — embed and index a description
+    - [x] `GET /a/<hash>/description` — retrieve description
 
 20. Discovery mechanisms include **hash lookup, tags, relationship traversal,
     full-text search, and semantic nearest-neighbor search**.
+    - [x] hash lookup (`GET /a/<aa>/<bb>/<rest>.ts`)
+    - [x] semantic nearest-neighbor search (`GET /search?q=&k=`)
+    - [ ] tags, relationship traversal, full-text search
 
 21. Retrieval results are **reranked using multiple signals**, such as semantic
     similarity, graph centrality, test coverage, audits, ratings, recency, and
@@ -166,6 +173,10 @@
 
 33. Embeddings enable **semantic discovery from both code queries and
     natural-language descriptions**.
+    - [x] descriptions embedded with `nomic-embed-text` via Ollama (or any
+          OpenAI-compatible endpoint)
+    - [x] `zts search <query>` CLI command
+    - [x] `zts describe <hash> -m <text>` CLI command
 
 34. AI agents interact with the system by **retrieving existing atoms,
     preferring reuse, and submitting new atoms only when necessary**.

@@ -2,12 +2,25 @@ import { brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bundleZip } from "./bundle.ts";
+import { EmbeddingStore } from "./db.ts";
+import {
+  checkEmbeddingService,
+  defaultEmbedConfig,
+  fetchEmbedding,
+} from "./embed.ts";
+import { HnswIndex } from "./hnsw.ts";
 import { validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
 
 export const STORAGE_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
 export const PORT = 8000;
+
+const embedConfig = defaultEmbedConfig();
+const EMBED_DIM = parseInt(Deno.env.get("ZTS_EMBED_DIM") ?? "768");
+
+let embedStore: EmbeddingStore;
+let hnswIndex: HnswIndex;
 
 async function git(...args: string[]): Promise<string> {
   const cmd = new Deno.Command("git", {
@@ -178,20 +191,128 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
+  // POST /a/<hash>/description — store a searchable description for an atom
+  if (req.method === "POST") {
+    const descMatch = path.match(/^\/a\/([a-z0-9]{25})\/description$/);
+    if (descMatch) {
+      const hash = descMatch[1];
+      // Verify atom exists
+      try {
+        await Deno.stat(hashToFilePath(hash));
+      } catch {
+        return new Response("Atom not found", { status: 404 });
+      }
+      const description = (await req.text()).trim();
+      if (!description) {
+        return new Response("Empty description", { status: 400 });
+      }
+      const vec = await fetchEmbedding(description, embedConfig);
+      if (!vec) {
+        return new Response(
+          JSON.stringify({ error: "embedding service unavailable" }),
+          { status: 503, headers: { "content-type": "application/json" } },
+        );
+      }
+      const isNew = !embedStore.hasHash(hash);
+      embedStore.upsert(hash, description, vec);
+      hnswIndex.add(hash, vec);
+      return new Response("ok\n", {
+        status: isNew ? 201 : 200,
+        headers: { "content-type": "text/plain" },
+      });
+    }
+  }
+
+  // GET /a/<hash>/description — retrieve stored description
+  if (req.method === "GET") {
+    const descMatch = path.match(/^\/a\/([a-z0-9]{25})\/description$/);
+    if (descMatch) {
+      const desc = embedStore.getDescription(descMatch[1]);
+      if (!desc) return new Response("Not found", { status: 404 });
+      return new Response(desc, { headers: { "content-type": "text/plain" } });
+    }
+  }
+
+  // GET /search?q=<text>[&k=10] — semantic nearest-neighbor search
+  if (req.method === "GET" && path === "/search") {
+    const q = url.searchParams.get("q")?.trim();
+    if (!q) return new Response("Missing ?q=", { status: 400 });
+    const k = Math.min(
+      parseInt(url.searchParams.get("k") ?? "10", 10),
+      100,
+    );
+    if (isNaN(k) || k < 1) return new Response("Invalid k", { status: 400 });
+
+    const queryVec = await fetchEmbedding(q, embedConfig);
+    if (!queryVec) {
+      return new Response(
+        JSON.stringify({ error: "embedding service unavailable" }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      );
+    }
+
+    const hits = hnswIndex.search(queryVec, k);
+    const body = hits.map(({ hash, score }) => ({
+      hash,
+      score,
+      url: hashToUrlPath(hash),
+      description: embedStore.getDescription(hash) ?? "",
+    }));
+    return new Response(JSON.stringify(body), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   return new Response("Not found", { status: 404 });
 }
 
 export async function serve(): Promise<void> {
   await initRepo();
+
+  embedStore = new EmbeddingStore(`${STORAGE_DIR}/zts.db`);
+  const allVecs = embedStore.getAll();
+  hnswIndex = HnswIndex.create(
+    EMBED_DIM,
+    Math.max(allVecs.size * 2, 1024),
+  );
+  for (const [hash, vec] of allVecs) hnswIndex.add(hash, vec);
+  if (allVecs.size > 0) {
+    console.log(`Loaded ${hnswIndex.size} embeddings into HNSW index`);
+  }
+
+  // Warn if embedding service is unreachable (non-blocking)
+  checkEmbeddingService(embedConfig).then((ok) => {
+    if (!ok) {
+      console.warn(
+        `warning: embedding service not reachable at ${embedConfig.url}`,
+      );
+      console.warn(
+        "  POST /a/<hash>/description and GET /search will return 503",
+      );
+      console.warn(
+        "  Existing embeddings are still indexed and searchable if present",
+      );
+    }
+  });
+
   Deno.serve({ port: PORT }, handler);
   console.log(`Listening on http://localhost:${PORT}`);
   console.log(
-    "  POST /a                        — store atom (requires X-Commit-Message header)",
+    "  POST /a                          — store atom (requires X-Commit-Message header)",
   );
   console.log(
-    "  GET  /a/<aa>/<bb>/<rest>.ts    — retrieve code by content address",
+    "  GET  /a/<aa>/<bb>/<rest>.ts      — retrieve code by content address",
   );
   console.log(
-    "  GET  /bundle/<hash>            — download zip bundle of atom + dependencies",
+    "  GET  /bundle/<hash>              — download zip bundle of atom + dependencies",
+  );
+  console.log(
+    "  POST /a/<hash>/description       — store searchable description for an atom",
+  );
+  console.log(
+    "  GET  /a/<hash>/description       — retrieve description",
+  );
+  console.log(
+    "  GET  /search?q=<text>[&k=10]     — semantic nearest-neighbor search",
   );
 }
