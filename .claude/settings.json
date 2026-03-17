@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allowedTools": [
+      "Bash(deno task zts get*)",
+      "Bash(deno task zts search*)",
+      "Bash(deno task zts post*)",
+      "Bash(deno task zts describe*)",
+      "Bash(deno task zts test*)",
+      "Bash(deno task zts bundle*)"
+    ]
+  }
+}
