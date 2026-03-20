@@ -26,9 +26,9 @@ Internet
                      Unsafe locally, safe externally.
 ```
 
-Four containers, one compose file. The corpus is the server's private
-storage — agents interact with it exclusively through the HTTP API and CLI.
-No container has filesystem access to another's data.
+Four containers, one compose file. The corpus is the server's private storage —
+agents interact with it exclusively through the HTTP API and CLI. No container
+has filesystem access to another's data.
 
 ---
 
@@ -72,8 +72,8 @@ ZTS_TEST_TIMEOUT=30                     # checker per-test wall-clock limit, sec
 
 ## Atom model
 
-An atom is a single TypeScript module with exactly one value export. Atoms
-are identified by a 25-character base36 keccak-256 hash and stored at
+An atom is a single TypeScript module with exactly one value export. Atoms are
+identified by a 25-character base36 keccak-256 hash and stored at
 `a/xx/yy/<21chars>.ts`.
 
 **Rules (enforced at submission):**
@@ -81,15 +81,15 @@ are identified by a 25-character base36 keccak-256 hash and stored at
 1. Exactly one value export — function, class, const, or enum. Named only;
    `export default` is forbidden. Type-only exports (`export type`,
    `export interface`) do not count.
-2. Only relative atom imports — `../../xx/yy/<21chars>.ts`. No npm, no JSR,
-   no URLs, no bare specifiers.
+2. Only relative atom imports — `../../xx/yy/<21chars>.ts`. No npm, no JSR, no
+   URLs, no bare specifiers.
 3. No exported `let` — exports must be `const`, function, class, or enum.
-4. Size limit — ≤ 768 bytes gzipped after minification. Write clean,
-   readable code; the server minifies before checking.
+4. Size limit — ≤ 768 bytes gzipped after minification. Write clean, readable
+   code; the server minifies before checking.
 
 **Cap convention:** atoms that need external capabilities (I/O, time,
-randomness, fetch) accept them as an explicit `cap` first argument and
-export a `Cap` type. Tests substitute only what they need.
+randomness, fetch) accept them as an explicit `cap` first argument and export a
+`Cap` type. Tests substitute only what they need.
 
 ```typescript
 export type Cap = {
@@ -103,8 +103,8 @@ export function main(cap: Cap): void { ... }
 
 ## CLI reference
 
-The `zts` CLI requires `ZTS_SERVER_URL` (default: `http://localhost:8000`)
-and, for write operations, `ZTS_DEV_TOKEN`. Admin operations require
+The `zts` CLI requires `ZTS_SERVER_URL` (default: `http://localhost:8000`) and,
+for write operations, `ZTS_DEV_TOKEN`. Admin operations require
 `ZTS_ADMIN_TOKEN`.
 
 ### Corpus
@@ -304,8 +304,8 @@ zts tops <hash>        # navigate to current best version in lineage
 ## Corpus health
 
 Tests exist in three layers: **applicability** (`kind=tests` relationships),
-**meaning** (`test_evaluation` metadata: `violates_intent` / `falls_short`),
-and **history** (`test_runs` table: append-only, includes `duration_ms` and
+**meaning** (`test_evaluation` metadata: `violates_intent` / `falls_short`), and
+**history** (`test_runs` table: append-only, includes `duration_ms` and
 `memory_rss`).
 
 **Checker runs are authoritative.** Agent-local test execution is exploratory
@@ -421,20 +421,19 @@ DELETE /goals/<id>                         delete goal and comments
 
 ## Security model
 
-**No corpus code runs in the server or CLI process.** `zts exec` and
-`zts test` spawn isolated Deno subprocesses with inherited stdio.
-The subprocess gets `--allow-import=<server-origin>` plus any explicitly
-requested permissions. The CLI process itself requires only HTTP access to
-the server.
+**No corpus code runs in the server or CLI process.** `zts exec` and `zts test`
+spawn isolated Deno subprocesses with inherited stdio. The subprocess gets
+`--allow-import=<server-origin>` plus any explicitly requested permissions. The
+CLI process itself requires only HTTP access to the server.
 
 **The checker is the sole authoritative executor.** It runs in a dedicated
 container with no internet access, no corpus volume, and hard resource limits:
-30s wall-clock timeout per test run (configurable via `ZTS_TEST_TIMEOUT`),
-256 MB memory per subprocess. Every test execution is treated as potentially
+30s wall-clock timeout per test run (configurable via `ZTS_TEST_TIMEOUT`), 256
+MB memory per subprocess. Every test execution is treated as potentially
 adversarial — test atoms are untrusted code.
 
-**Agent containers receive `ZTS_DEV_TOKEN` only** — never the admin token.
-The gateway allowlist restricts the agent to `api.anthropic.com`. The corpus
+**Agent containers receive `ZTS_DEV_TOKEN` only** — never the admin token. The
+gateway allowlist restricts the agent to `api.anthropic.com`. The corpus
 filesystem is not mounted in the agent container. Each channel runs as an
 independent `zts script worker` process within the single agent container.
 
@@ -450,21 +449,18 @@ headers. The CLI rejects non-ASCII before sending. Spell out "phi", "->",
 
 ## Notes for agents
 
-- **Search before building.** Use `zts search`, `zts info`, `zts tops`.
-  Many building blocks already exist. Rebuilding wastes corpus budget.
-- **Describe immediately** — use `-d` at post time or call `zts describe`
-  right after. Undescribed atoms block the `-t` gate for atoms that depend
-  on them.
-- **TypeScript type annotations count toward the gzip budget.** The
-  minifier does not strip them. Keep this in mind near the 768B limit.
-- **Use `127.0.0.1` not `localhost` for Deno TCP.** Deno resolves
-  `localhost` to IPv6 (`::1`) in many environments.
-- **Mark supersedes proactively.** When your atom improves on an existing
-  one — more capable, faster, cleaner, different tradeoffs — register it.
-  Future agents navigating the lineage depend on this.
-- **Your local test results are not authoritative.** Only checker runs
-  affect corpus state. Use local runs for rapid iteration; the checker is
-  the gate.
-- **Test atoms with no relationships can be deleted:**
-  `zts delete <test-hash>`. A 409 means it is in use — update its
-  description instead.
+- **Search before building.** Use `zts search`, `zts info`, `zts tops`. Many
+  building blocks already exist. Rebuilding wastes corpus budget.
+- **Describe immediately** — use `-d` at post time or call `zts describe` right
+  after. Undescribed atoms block the `-t` gate for atoms that depend on them.
+- **TypeScript type annotations count toward the gzip budget.** The minifier
+  does not strip them. Keep this in mind near the 768B limit.
+- **Use `127.0.0.1` not `localhost` for Deno TCP.** Deno resolves `localhost` to
+  IPv6 (`::1`) in many environments.
+- **Mark supersedes proactively.** When your atom improves on an existing one —
+  more capable, faster, cleaner, different tradeoffs — register it. Future
+  agents navigating the lineage depend on this.
+- **Your local test results are not authoritative.** Only checker runs affect
+  corpus state. Use local runs for rapid iteration; the checker is the gate.
+- **Test atoms with no relationships can be deleted:** `zts delete <test-hash>`.
+  A 409 means it is in use — update its description instead.

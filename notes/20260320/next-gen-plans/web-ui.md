@@ -1,23 +1,24 @@
 # Web UI
 
-Served by zts-server at `/ui/`. No separate frontend container — the UI
-is static HTML/JS/CSS served by the same Deno process that handles the API.
-Admin token required for admin operations; dev token for write operations;
-read-only views work unauthenticated.
+Served by zts-server at `/ui/`. No separate frontend container — the UI is
+static HTML/JS/CSS served by the same Deno process that handles the API. Admin
+token required for admin operations; dev token for write operations; read-only
+views work unauthenticated.
 
-Ollama runs in the zts-server container alongside the Deno process,
-providing embedding generation for semantic search.
+Ollama runs in the zts-server container alongside the Deno process, providing
+embedding generation for semantic search.
 
 ---
 
 ## Auth in the browser
 
-Login screen accepts a bearer token (admin or dev). Stored in a
-session cookie or localStorage. The UI includes it as
-`Authorization: Bearer <token>` on all API requests. Read-only views
-(corpus browser, search, status) work without login.
+Login screen accepts a bearer token (admin or dev). Stored in a session cookie
+or localStorage. The UI includes it as `Authorization: Bearer <token>` on all
+API requests. Read-only views (corpus browser, search, status) work without
+login.
 
 The token tier determines what the UI exposes:
+
 - **No token**: browse, search, view atoms and relationships
 - **Dev**: everything above, plus describe, relate, mark done/undone, comment
 - **Admin**: everything above, plus goal CRUD, weight editing
@@ -37,8 +38,8 @@ The landing page. Live version of `zts status`:
 - Defects list (expandable)
 - Recent log entries (last 20 write operations)
 
-Auto-refreshes on a reasonable interval (30s). Gives an operator an
-at-a-glance picture without touching the CLI.
+Auto-refreshes on a reasonable interval (30s). Gives an operator an at-a-glance
+picture without touching the CLI.
 
 ### Corpus browser (`/ui/atoms`)
 
@@ -46,6 +47,7 @@ Paginated atom list. Columns: hash (truncated, links to detail), description
 (first line), goal tag, gzip size, created date. Sortable by date and size.
 
 Filters:
+
 - Text search (description embeddings)
 - Code search (FTS5 on source)
 - Goal dropdown
@@ -60,16 +62,16 @@ Clicking an atom opens the detail view.
 Single-page view for one atom:
 
 - **Source** — syntax-highlighted TypeScript, read-only
-- **Metadata** — description (editable with admin/dev token), goal tag,
-  gzip size, created date
+- **Metadata** — description (editable with admin/dev token), goal tag, gzip
+  size, created date
 - **Relationships** panel:
   - Imports (outgoing `kind=imports`) — clickable links to dependencies
   - Imported by (incoming `kind=imports`) — clickable links to dependents
-  - Tests (outgoing/incoming `kind=tests`) — with pass/fail indicators
-    from `test_evaluation`
+  - Tests (outgoing/incoming `kind=tests`) — with pass/fail indicators from
+    `test_evaluation`
   - Supersedes / superseded by — with link to `zts tops` view
-- **Test history** — last N runs from `test_runs`, with result, duration,
-  run_by badge (checker vs agent)
+- **Test history** — last N runs from `test_runs`, with result, duration, run_by
+  badge (checker vs agent)
 - **Properties** — current key-value properties on this atom
 - **Actions** (token-gated):
   - Edit description
@@ -80,25 +82,25 @@ Single-page view for one atom:
 
 ### Graph view (`/ui/graph/<hash>`)
 
-Interactive dependency graph centered on one atom. Renders the transitive
-import tree plus supersedes edges. Nodes are clickable (navigate to atom
-detail). Color-coded:
+Interactive dependency graph centered on one atom. Renders the transitive import
+tree plus supersedes edges. Nodes are clickable (navigate to atom detail).
+Color-coded:
 
 - Green: healthy (all tests pass)
 - Red: defect (`violates_intent`)
 - Yellow: superseded
 - Grey: no test coverage
 
-Depth-limited by default (3 levels); expandable. Uses a lightweight
-client-side graph layout library (e.g., d3-force, elkjs, or dagre).
+Depth-limited by default (3 levels); expandable. Uses a lightweight client-side
+graph layout library (e.g., d3-force, elkjs, or dagre).
 
 Also accessible from atom detail page as a "view graph" link.
 
 ### Lineage view (`/ui/tops/<hash>`)
 
-Visual `zts tops` — renders the supersedes DAG from a starting atom
-upward to all tops. Each node shows hash, description first line, and
-depth. Tops are highlighted. Clickable to atom detail.
+Visual `zts tops` — renders the supersedes DAG from a starting atom upward to
+all tops. Each node shows hash, description first line, and depth. Tops are
+highlighted. Clickable to atom detail.
 
 ### Search (`/ui/search`)
 
@@ -111,22 +113,26 @@ Combined search interface:
 ### Goals (`/ui/goals`)
 
 Goal list with:
+
 - Name, weight (editable for admin), done status
 - Atom count and recent contribution rate
 - Expandable: full body (markdown rendered), comment thread
 
 Admin actions:
+
 - Create goal (name, weight, body)
 - Edit weight and body inline
 - Delete (with confirmation)
 
 Agent actions (dev token):
+
 - Mark done / undone
 - Add comment
 
 ### Goal detail (`/ui/goals/<name>`)
 
 Full goal view:
+
 - Body (markdown rendered)
 - Comment thread (chronological, timestamped)
 - Atom list: all atoms tagged with this goal, sorted by date
@@ -141,11 +147,10 @@ Per-channel view of agent loop activity:
 - Recent iteration log: start time, duration, atoms posted, exit code
 - Expandable: full handover content, iteration stream excerpt
 
-This reads from the agent workspace via the server (the workspace
-directory or a status endpoint the loop runner exposes). If the agent
-runs in a separate container, the server would need a lightweight
-status API from the agent — or the loop runner could POST iteration
-summaries to the server's log table.
+This reads from the agent workspace via the server (the workspace directory or a
+status endpoint the loop runner exposes). If the agent runs in a separate
+container, the server would need a lightweight status API from the agent — or
+the loop runner could POST iteration summaries to the server's log table.
 
 ### Audit log (`/ui/log`)
 
@@ -161,8 +166,8 @@ Paginated, filterable view of the `log` table:
 
 ### Static assets
 
-The UI is a set of static files (HTML, JS, CSS) bundled into the server.
-No build step required at runtime. Options:
+The UI is a set of static files (HTML, JS, CSS) bundled into the server. No
+build step required at runtime. Options:
 
 1. **Embedded at compile time** — files are bundled into the Deno binary.
    Simplest deployment; no loose files.
@@ -173,24 +178,24 @@ Option 1 for production, option 2 for development.
 
 ### Rendering
 
-Server-side rendered HTML with minimal client-side JS is preferred over
-a heavy SPA framework. The API already exists — the UI is a thin layer
-of HTML templates + fetch calls. Client-side JS is needed for:
+Server-side rendered HTML with minimal client-side JS is preferred over a heavy
+SPA framework. The API already exists — the UI is a thin layer of HTML
+templates + fetch calls. Client-side JS is needed for:
 
 - Graph visualization (d3-force or similar)
 - Auto-refresh on dashboard
 - Inline editing (description, goal weight)
 - Search-as-you-type
 
-Everything else can be plain HTML served by the Deno process. Use
-`<template>` elements or a lightweight template engine (e.g., eta, mustache)
-on the server side.
+Everything else can be plain HTML served by the Deno process. Use `<template>`
+elements or a lightweight template engine (e.g., eta, mustache) on the server
+side.
 
 ### API reuse
 
-The UI calls the same HTTP API that the CLI uses. No separate backend
-endpoints. The token is passed via `Authorization` header from JS
-fetch calls, same as the CLI. This means:
+The UI calls the same HTTP API that the CLI uses. No separate backend endpoints.
+The token is passed via `Authorization` header from JS fetch calls, same as the
+CLI. This means:
 
 - Every UI action is testable via curl
 - The API is the single source of truth
@@ -198,9 +203,9 @@ fetch calls, same as the CLI. This means:
 
 ### Ollama
 
-Ollama runs in the zts-server container. The server calls it locally
-for embedding generation (on atom post/describe) and semantic search
-queries. No external API dependency for embeddings.
+Ollama runs in the zts-server container. The server calls it locally for
+embedding generation (on atom post/describe) and semantic search queries. No
+external API dependency for embeddings.
 
 Environment: `OLLAMA_MODEL` (default: a small embedding model like
 `nomic-embed-text` or `all-minilm`).

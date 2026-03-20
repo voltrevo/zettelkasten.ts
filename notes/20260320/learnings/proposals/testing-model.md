@@ -4,8 +4,8 @@
 
 This proposal supersedes `failing-tests.md`. The `kind=fails` relationship
 described there is replaced by the evaluation metadata table below. The
-`BROKEN:` description prefix convention remains useful for human-readable
-search discoverability and is not replaced.
+`BROKEN:` description prefix convention remains useful for human-readable search
+discoverability and is not replaced.
 
 ---
 
@@ -34,14 +34,14 @@ applicable to this target atom. No outcome, no interpretation.
 kind=tests  from=<test>  to=<target>   # T is applicable to target
 ```
 
-This is the only test-related relationship kind. `kind=fails` does not exist
-in this model.
+This is the only test-related relationship kind. `kind=fails` does not exist in
+this model.
 
 ---
 
 ### Layer 2: test evaluation metadata (meaning)
 
-A dedicated SQLite table encodes what each test-target pair *means*:
+A dedicated SQLite table encodes what each test-target pair _means_:
 
 ```sql
 CREATE TABLE test_evaluation (
@@ -56,23 +56,25 @@ CREATE TABLE test_evaluation (
 ```
 
 **`mode`:**
-- `contract` — the test checks correctness / original intent. A failure
-  means the atom does not satisfy its claimed behavior.
-- `benchmark` — the test checks relative quality: performance, capability,
-  or fitness. A failure means the atom is valid but no longer competitive.
+
+- `contract` — the test checks correctness / original intent. A failure means
+  the atom does not satisfy its claimed behavior.
+- `benchmark` — the test checks relative quality: performance, capability, or
+  fitness. A failure means the atom is valid but no longer competitive.
 
 **`expected_outcome`:**
-- `pass` — the test is expected to pass. This is the default for all
-  registered test relationships; if no metadata row exists, `pass` is assumed.
-- `violates_intent` — the test is expected to fail because the atom is
-  broken. Objective evidence of a correctness defect. (`mode=contract` only)
-- `falls_short` — the test is expected to fail because the atom is outdated
-  or outclassed in the dimension the test measures. Not broken, just
-  superseded in that dimension. (`mode=benchmark` only)
+
+- `pass` — the test is expected to pass. This is the default for all registered
+  test relationships; if no metadata row exists, `pass` is assumed.
+- `violates_intent` — the test is expected to fail because the atom is broken.
+  Objective evidence of a correctness defect. (`mode=contract` only)
+- `falls_short` — the test is expected to fail because the atom is outdated or
+  outclassed in the dimension the test measures. Not broken, just superseded in
+  that dimension. (`mode=benchmark` only)
 
 **One row per (test, target) pair.** This is the current intended
-interpretation, not a history. Avoid storing multiple rows here; use the
-runs table (layer 3) for history.
+interpretation, not a history. Avoid storing multiple rows here; use the runs
+table (layer 3) for history.
 
 ---
 
@@ -94,33 +96,33 @@ CREATE TABLE test_runs (
 );
 ```
 
-**Append-only.** Never update or delete rows. This is a permanent record of
-what happened.
+**Append-only.** Never update or delete rows. This is a permanent record of what
+happened.
 
 **`run_by`:** distinguishes checker-authoritative runs from agent-local
 exploration runs (see authority model below).
 
-**Metrics** (`duration_ms`, `memory_rss`) are observational only. They are
-not used for pass/fail determination but enable performance tracking,
-flakiness detection, and regression analysis over time.
+**Metrics** (`duration_ms`, `memory_rss`) are observational only. They are not
+used for pass/fail determination but enable performance tracking, flakiness
+detection, and regression analysis over time.
 
 ---
 
 ## Authority model
 
-**Checker runs are authoritative.** When the checker executes a test, the
-result is stored in `test_runs` with `run_by='checker'` and is the ground
-truth for corpus health, `zts exec` warnings, and relationship registration.
+**Checker runs are authoritative.** When the checker executes a test, the result
+is stored in `test_runs` with `run_by='checker'` and is the ground truth for
+corpus health, `zts exec` warnings, and relationship registration.
 
-**Agent-local runs are exploratory.** When an agent runs `zts test` from
-within the agent container, results are stored with `run_by='agent'`. These
-are useful for rapid iteration but do not affect corpus state. An agent
-cannot change the authoritative status of an atom by running tests locally.
+**Agent-local runs are exploratory.** When an agent runs `zts test` from within
+the agent container, results are stored with `run_by='agent'`. These are useful
+for rapid iteration but do not affect corpus state. An agent cannot change the
+authoritative status of an atom by running tests locally.
 
-**Divergence is a meaningful signal.** If agent-local and checker runs
-disagree on the same (test, target) pair, this suggests an environment
-difference worth investigating — nondeterminism, platform-specific behavior,
-or resource limit effects.
+**Divergence is a meaningful signal.** If agent-local and checker runs disagree
+on the same (test, target) pair, this suggests an environment difference worth
+investigating — nondeterminism, platform-specific behavior, or resource limit
+effects.
 
 ```
 Local = exploration
@@ -150,8 +152,8 @@ zts test <hash> --expected violates_intent
 zts test <hash> --expected falls_short
 ```
 
-These run via checker and store results, but do not affect `zts exec`
-warnings on their own (see below).
+These run via checker and store results, but do not affect `zts exec` warnings
+on their own (see below).
 
 ---
 
@@ -164,8 +166,8 @@ zts post -m "..." -t "<test-hash>" /tmp/impl.ts
 # → registers kind=tests from=<test> to=<new-atom> with expected_outcome=pass
 ```
 
-This is unchanged. The `-t` gate runs the test via checker and registers
-the relationship + metadata (expected_outcome=pass) atomically.
+This is unchanged. The `-t` gate runs the test via checker and registers the
+relationship + metadata (expected_outcome=pass) atomically.
 
 ### Mark an atom as having a correctness defect (`violates_intent`)
 
@@ -173,10 +175,11 @@ the relationship + metadata (expected_outcome=pass) atomically.
 zts fail <test-hash> <target-hash>
 ```
 
-Sets `expected_outcome=violates_intent, mode=contract` in `test_evaluation`
-for this (test, target) pair. The server:
-1. Verifies the test already has `expected_outcome=pass` against at least
-   one other atom (proves the test is valid, not buggy)
+Sets `expected_outcome=violates_intent, mode=contract` in `test_evaluation` for
+this (test, target) pair. The server:
+
+1. Verifies the test already has `expected_outcome=pass` against at least one
+   other atom (proves the test is valid, not buggy)
 2. Runs the test against the target via checker; verifies it actually fails
 3. Stores the metadata row on success
 
@@ -189,11 +192,10 @@ Precondition failure → 422. This is the same precondition as the old
 zts benchmark <test-hash> <target-hash>
 ```
 
-Sets `expected_outcome=falls_short, mode=benchmark` in `test_evaluation`.
-No precondition check — a benchmark test expressing selection pressure does
-not need to be validated against a "fix." The test is run via checker and
-must actually fail against the target (otherwise the `falls_short` claim is
-wrong).
+Sets `expected_outcome=falls_short, mode=benchmark` in `test_evaluation`. No
+precondition check — a benchmark test expressing selection pressure does not
+need to be validated against a "fix." The test is run via checker and must
+actually fail against the target (otherwise the `falls_short` claim is wrong).
 
 ### Read evaluation metadata
 
@@ -209,8 +211,9 @@ zts eval set <test-hash> <target-hash> --commentary "why this is expected to fai
 
 ## Effect on `zts exec`
 
-If the atom (or any transitive dependency) has `expected_outcome=violates_intent`
-metadata against any test, `zts exec` warns before running:
+If the atom (or any transitive dependency) has
+`expected_outcome=violates_intent` metadata against any test, `zts exec` warns
+before running:
 
 ```
 warning: 3ax9b... has known correctness defects:
@@ -238,18 +241,18 @@ The bridge to the supersedes proposal: when `zts fail <T> <A>` succeeds
 kind=supersedes  from=B  to=A
 ```
 
-This is the same auto-registration logic as before, now triggered by
-metadata state rather than `kind=fails` relationships.
+This is the same auto-registration logic as before, now triggered by metadata
+state rather than `kind=fails` relationships.
 
 ---
 
 ## Summary
 
-| Layer | Table | What it stores |
-|---|---|---|
+| Layer         | Table                        | What it stores                   |
+| ------------- | ---------------------------- | -------------------------------- |
 | Applicability | `relationships` (kind=tests) | which tests apply to which atoms |
-| Meaning | `test_evaluation` | what failure means for each pair |
-| History | `test_runs` | every execution, with metrics |
+| Meaning       | `test_evaluation`            | what failure means for each pair |
+| History       | `test_runs`                  | every execution, with metrics    |
 
-Checker runs are authoritative. Agent runs are exploratory. Divergence
-between the two is a signal worth noting.
+Checker runs are authoritative. Agent runs are exploratory. Divergence between
+the two is a signal worth noting.

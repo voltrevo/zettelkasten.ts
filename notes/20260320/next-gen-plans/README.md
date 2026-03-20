@@ -8,46 +8,45 @@ agent loop as a first-class feature of the tool.
 
 ## Files
 
-| File | Contents |
-|---|---|
-| [ASPIRATIONAL_README.md](ASPIRATIONAL_README.md) | Full target-state CLI + API reference |
-| [schema.md](schema.md) | Complete SQLite schema (all tables) |
-| [testing.md](testing.md) | Three-layer testing model, checker authority |
-| [deployment.md](deployment.md) | Auth, Docker, agent loop, workspace |
-| [web-ui.md](web-ui.md) | Admin web UI: dashboard, corpus browser, graph, goals, agent monitor |
+| File                                                                             | Contents                                                                                                                                                   |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ASPIRATIONAL_README.md](ASPIRATIONAL_README.md)                                 | Full target-state CLI + API reference                                                                                                                      |
+| [schema.md](schema.md)                                                           | Complete SQLite schema (all tables)                                                                                                                        |
+| [testing.md](testing.md)                                                         | Three-layer testing model, checker authority                                                                                                               |
+| [deployment.md](deployment.md)                                                   | Auth, Docker, agent loop, workspace                                                                                                                        |
+| [web-ui.md](web-ui.md)                                                           | Admin web UI: dashboard, corpus browser, graph, goals, agent monitor                                                                                       |
 | [../learnings/reference/claude-sandbox/](../learnings/reference/claude-sandbox/) | Working two-container Claude Code sandbox (Squid gateway + Ubuntu). Basis for the agent/gateway container design. See its ISSUES.md for pitfalls to avoid. |
 
 ---
 
 ## Implementation order
 
-Strict sequence. Each step builds on the previous. The conceptual example
-after each step shows what should work when that step is done.
+Strict sequence. Each step builds on the previous. The conceptual example after
+each step shows what should work when that step is done.
 
 **Pre-implementation notes:**
 
-- **Migration** of the existing git-backed corpus into SQLite is deferred.
-  Not automated — done interactively when the new schema is ready.
-  The existing corpus is small enough for manual/scripted migration.
-  This is not yet a public-facing product.
-- **Schema versioning**: include a `schema_version` table from day one.
-  Check on startup, fail clearly if the DB is ahead of the server.
-- **`-t` is strict by default.** The transitive "all deps must have tests"
-  check remains and is now the default. Override with `--allow-untested-deps`
-  when necessary. Agents should prefer fixing (adding missing test
-  relationships) over overriding.
-- **Pre-Docker testing**: before the checker container exists, the server
-  runs test subprocesses locally. Results are still authoritative in
-  single-player mode. The checker container adds multi-tenant hardening,
-  not a new capability.
+- **Migration** of the existing git-backed corpus into SQLite is deferred. Not
+  automated — done interactively when the new schema is ready. The existing
+  corpus is small enough for manual/scripted migration. This is not yet a
+  public-facing product.
+- **Schema versioning**: include a `schema_version` table from day one. Check on
+  startup, fail clearly if the DB is ahead of the server.
+- **`-t` is strict by default.** The transitive "all deps must have tests" check
+  remains and is now the default. Override with `--allow-untested-deps` when
+  necessary. Agents should prefer fixing (adding missing test relationships)
+  over overriding.
+- **Pre-Docker testing**: before the checker container exists, the server runs
+  test subprocesses locally. Results are still authoritative in single-player
+  mode. The checker container adds multi-tenant hardening, not a new capability.
 
 ---
 
 ### 1. SQLite atom storage + log table
 
-Create `atoms` and `log` tables. `POST /a` inserts a row; `GET /a/...`
-selects by hash. All write endpoints insert a log row in the same
-transaction. Remove the git repo as corpus backing store.
+Create `atoms` and `log` tables. `POST /a` inserts a row; `GET /a/...` selects
+by hash. All write endpoints insert a log row in the same transaction. Remove
+the git repo as corpus backing store.
 
 ```
 $ zts post -d "computes GCD of two integers using Euclidean algorithm" /tmp/gcd.ts
@@ -60,8 +59,8 @@ One transaction: atom stored, description recorded, log entry written.
 
 ### 2. Size limit 1024B + clear rejection
 
-Bump gzip-after-minification limit from 768B to 1024B. When an atom
-exceeds the limit, the rejection message must explain:
+Bump gzip-after-minification limit from 768B to 1024B. When an atom exceeds the
+limit, the rejection message must explain:
 
 - Size is measured after minification + gzip
 - Removing comments or whitespace will not help — the minifier already does this
@@ -115,9 +114,9 @@ c7d3f...  simplifyFraction (imports gcd)
 
 ### 5. Properties
 
-Create `properties` table. Key-value metadata on individual atoms —
-the single-atom counterpart to relationships. `starred` is the first
-key, admin-only. General-purpose: future keys added without schema changes.
+Create `properties` table. Key-value metadata on individual atoms — the
+single-atom counterpart to relationships. `starred` is the first key,
+admin-only. General-purpose: future keys added without schema changes.
 
 ```
 $ zts prop set 3ax9b starred
@@ -136,8 +135,8 @@ starred
 
 Create `test_evaluation` and `test_runs` tables. Implement:
 
-- `zts fail <test> <broken>` — mark correctness defect (checker verifies
-  the test fails against the target; requires test passes against a fix)
+- `zts fail <test> <broken>` — mark correctness defect (checker verifies the
+  test fails against the target; requires test passes against a fix)
 - `zts benchmark <test> <target>` — mark improvement opportunity
 - `zts eval show <test> <target>` — read evaluation metadata
 - `zts eval set <test> <target> --commentary "why"` — annotate
@@ -160,9 +159,9 @@ warning: d3e4f has known correctness defects:
 
 ### 7. Supersedes + tops
 
-Add `kind=supersedes` relationship. Implement `zts tops` for BFS navigation
-to current best alternatives. Auto-register supersedes from `zts fail`
-evidence. Annotate superseded atoms in search results and `zts exec` output.
+Add `kind=supersedes` relationship. Implement `zts tops` for BFS navigation to
+current best alternatives. Auto-register supersedes from `zts fail` evidence.
+Annotate superseded atoms in search results and `zts exec` output.
 
 ```
 $ zts relate <v2-hash> <v1-hash> supersedes
@@ -179,8 +178,8 @@ Depth 1:
 
 ### 8. FTS5 source code search
 
-Create `atoms_fts` virtual table on atom source. Complement existing
-embedding search on descriptions with full-text search on code.
+Create `atoms_fts` virtual table on atom source. Complement existing embedding
+search on descriptions with full-text search on code.
 
 ```
 $ zts search "GCD"
@@ -198,9 +197,9 @@ d4f7c...  HMAC-SHA256 per RFC 2104
 ### 9. Goals system
 
 Create `goals` and `goal_comments` tables. Add `goal` column to `atoms`.
-Implement agent commands (`zts goal pick/show/list/done/undone/comment/comments`)
-and admin commands (`zts admin goal add/set/list/delete`). Add `-g` flag
-to `zts post`.
+Implement agent commands
+(`zts goal pick/show/list/done/undone/comment/comments`) and admin commands
+(`zts admin goal add/set/list/delete`). Add `-g` flag to `zts post`.
 
 ```
 $ zts admin goal add websocket-framing --weight 0.8 --body "RFC 6455..."
@@ -257,10 +256,10 @@ $ curl http://localhost:8000/a/3a/x9/b7f2de1k4m8np3qrs.ts
 
 ### 12. Agent loop runner + workspace
 
-`zts script worker` emits a shell script that runs the autonomous agent
-loop. `zts script context` and `zts script iteration` emit the prompt
-fragments. `zts script setup` initializes a workspace. The prompts and
-loop runner ship with the tool — no loose orchestration files.
+`zts script worker` emits a shell script that runs the autonomous agent loop.
+`zts script context` and `zts script iteration` emit the prompt fragments.
+`zts script setup` initializes a workspace. The prompts and loop runner ship
+with the tool — no loose orchestration files.
 
 ```
 $ zts script setup --channel bricklane
@@ -278,10 +277,10 @@ $ zts script worker --channel bricklane | bash
 
 ### 13. Docker deployment
 
-Four containers: gateway (Squid proxy), zts-server (corpus + API +
-Ollama), checker (test execution), agent (Claude Code + zts CLI). One
-compose file. Ollama runs inside the zts-server container for embedding
-generation. See [deployment.md](deployment.md) for architecture.
+Four containers: gateway (Squid proxy), zts-server (corpus + API + Ollama),
+checker (test execution), agent (Claude Code + zts CLI). One compose file.
+Ollama runs inside the zts-server container for embedding generation. See
+[deployment.md](deployment.md) for architecture.
 
 ```
 $ cp .env.example .env && $EDITOR .env
@@ -295,9 +294,9 @@ $ docker compose logs -f agent
 
 Admin web interface served by zts-server at `/ui/`. Dashboard (live
 `zts status`), corpus browser with search and filters, atom detail with
-syntax-highlighted source, interactive dependency graph, lineage
-visualization, goal management, agent channel monitor, audit log.
-See [web-ui.md](web-ui.md) for full design.
+syntax-highlighted source, interactive dependency graph, lineage visualization,
+goal management, agent channel monitor, audit log. See [web-ui.md](web-ui.md)
+for full design.
 
 ```
 $ open http://localhost:8000/ui/

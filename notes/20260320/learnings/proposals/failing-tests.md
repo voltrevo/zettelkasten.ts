@@ -1,10 +1,10 @@
 # Proposal: failing tests (`kind=fails`) — SUPERSEDED
 
 > **This proposal has been superseded by `proposals/testing-model.md`.**
-> `kind=fails` as a relationship type does not exist in the new model.
-> Outcome and meaning are encoded in the `test_evaluation` metadata table.
-> The `zts fail` CLI command is preserved but sets metadata, not a
-> relationship kind. Read `testing-model.md` instead of this document.
+> `kind=fails` as a relationship type does not exist in the new model. Outcome
+> and meaning are encoded in the `test_evaluation` metadata table. The
+> `zts fail` CLI command is preserved but sets metadata, not a relationship
+> kind. Read `testing-model.md` instead of this document.
 
 ---
 
@@ -33,18 +33,18 @@ has at least one `kind=tests` relationship to another atom. This means: you
 cannot use a test as negative evidence unless it is already proven correct by
 passing against a fixed version of the atom.
 
-This prevents a buggy test from incorrectly marking a good atom as broken.
-It also enforces a workflow discipline: fix first, then mark broken.
+This prevents a buggy test from incorrectly marking a good atom as broken. It
+also enforces a workflow discipline: fix first, then mark broken.
 
 **Workflow:**
 
 1. Write a test that reproduces the bug. Post it normally (no `-t`).
 2. Write the corrected atom. Post it with the test gate:
-   `zts post -m "fix: ..." -t <test-hash> /tmp/fix.ts`
-   This registers `kind=tests from=<test> to=<fix>`.
+   `zts post -m "fix: ..." -t <test-hash> /tmp/fix.ts` This registers
+   `kind=tests from=<test> to=<fix>`.
 3. Now register the failure against the old atom:
-   `zts fail <test-hash> <broken-atom-hash>`
-   The server verifies step 2 was done, then accepts.
+   `zts fail <test-hash> <broken-atom-hash>` The server verifies step 2 was
+   done, then accepts.
 
 Step 3 before step 2 is rejected with 422.
 
@@ -69,10 +69,10 @@ complement. Both should be present when objective test evidence is available.
 
 ### Summary of server changes
 
-| Endpoint | Change |
-|---|---|
+| Endpoint                                | Change                                                                                                |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `POST /relationships` with `kind=fails` | Runs test against target (verifies failure); requires test to have ≥1 `kind=tests` rel; stores on 201 |
-| `GET /relationships?to=X&kind=fails` | Returns all tests that fail X |
-| `zts exec <hash>` | Rejects by default if hash or any dep has `kind=fails` rels |
-| `zts exec --allow-failures <hash>` | Override for debugging |
-| `zts fail <test> <target>` | CLI shorthand for registering `kind=fails` |
+| `GET /relationships?to=X&kind=fails`    | Returns all tests that fail X                                                                         |
+| `zts exec <hash>`                       | Rejects by default if hash or any dep has `kind=fails` rels                                           |
+| `zts exec --allow-failures <hash>`      | Override for debugging                                                                                |
+| `zts fail <test> <target>`              | CLI shorthand for registering `kind=fails`                                                            |

@@ -1,9 +1,8 @@
 # SQLite schema
 
-All server-managed state lives in `zts.db`. No git repo, no flat files.
-Atoms are stored as rows, not as `a/xx/yy/*.ts` files. The `xx/yy/rest`
-path format is preserved only as a URL convention for HTTP retrieval and
-inter-atom imports.
+All server-managed state lives in `zts.db`. No git repo, no flat files. Atoms
+are stored as rows, not as `a/xx/yy/*.ts` files. The `xx/yy/rest` path format is
+preserved only as a URL convention for HTTP retrieval and inter-atom imports.
 
 ---
 
@@ -22,11 +21,11 @@ CREATE TABLE atoms (
 );
 ```
 
-- `description` is NOT NULL. The CLI requires `-d` by default. Opt out
-  with `--no-description`; server accepts only if `X-Allow-No-Description`
-  header is present.
-- `goal` is the primary goal this atom was built for. One atom, one goal
-  (or none). Secondary reuse across goals is implicit through imports.
+- `description` is NOT NULL. The CLI requires `-d` by default. Opt out with
+  `--no-description`; server accepts only if `X-Allow-No-Description` header is
+  present.
+- `goal` is the primary goal this atom was built for. One atom, one goal (or
+  none). Secondary reuse across goals is implicit through imports.
 - `gzip_size` is computed at insertion time. The limit is 1024 bytes.
 
 ### relationships
@@ -46,8 +45,8 @@ CREATE TABLE relationships (
 
 ### properties
 
-Key-value metadata on individual atoms. Analogous to relationships
-(which connect two atoms), but for single-atom annotations.
+Key-value metadata on individual atoms. Analogous to relationships (which
+connect two atoms), but for single-atom annotations.
 
 ```sql
 CREATE TABLE properties (
@@ -60,12 +59,12 @@ CREATE TABLE properties (
 
 Some keys have special semantics:
 
-| Key | Value | Access | Meaning |
-|---|---|---|---|
-| `starred` | null | admin | Operator-curated highlight |
+| Key       | Value | Access | Meaning                    |
+| --------- | ----- | ------ | -------------------------- |
+| `starred` | null  | admin  | Operator-curated highlight |
 
-The table is intentionally general. Future keys can be added without
-schema changes.
+The table is intentionally general. Future keys can be added without schema
+changes.
 
 ### embeddings
 
@@ -87,8 +86,8 @@ description is updated.
 
 ### test_evaluation
 
-One row per (test, target) pair. Records the current intended
-interpretation, not history.
+One row per (test, target) pair. Records the current intended interpretation,
+not history.
 
 ```sql
 CREATE TABLE test_evaluation (
@@ -104,11 +103,10 @@ CREATE TABLE test_evaluation (
 
 - `contract` + `pass`: the test verifies correctness and is expected to pass.
   Default for all `-t` gate registrations.
-- `contract` + `violates_intent`: the test reproduces a bug. Objective
-  evidence of a correctness defect. Registered via `zts fail`.
-- `benchmark` + `falls_short`: the test measures a quality dimension the
-  atom does not meet. Not broken, just outclassed. Registered via
-  `zts benchmark`.
+- `contract` + `violates_intent`: the test reproduces a bug. Objective evidence
+  of a correctness defect. Registered via `zts fail`.
+- `benchmark` + `falls_short`: the test measures a quality dimension the atom
+  does not meet. Not broken, just outclassed. Registered via `zts benchmark`.
 - `commentary`: free-text explanation, set via `zts eval set`.
 
 If no `test_evaluation` row exists for a (test, target) pair that has a
@@ -133,8 +131,8 @@ CREATE TABLE test_runs (
 ```
 
 - `checker` runs are authoritative — they affect corpus state.
-- `agent` runs are exploratory — useful for rapid iteration, do not
-  affect corpus state.
+- `agent` runs are exploratory — useful for rapid iteration, do not affect
+  corpus state.
 - Divergence between checker and agent results is a meaningful signal
   (environment difference, nondeterminism, resource limits).
 
@@ -155,8 +153,8 @@ CREATE TABLE goals (
 );
 ```
 
-Goals are installation-local — they belong to a running zts instance,
-not the source repo.
+Goals are installation-local — they belong to a running zts instance, not the
+source repo.
 
 ### goal_comments
 
@@ -169,8 +167,8 @@ CREATE TABLE goal_comments (
 );
 ```
 
-Append-only observations per goal across sessions. Agents read these
-when picking up a goal with prior history.
+Append-only observations per goal across sessions. Agents read these when
+picking up a goal with prior history.
 
 ---
 
@@ -190,17 +188,17 @@ CREATE TABLE log (
 );
 ```
 
-Every write operation gets a log row. Detail is minimal — enough to
-identify what happened, not reproduce it:
+Every write operation gets a log row. Detail is minimal — enough to identify
+what happened, not reproduce it:
 
-| op | subject | detail example |
-|---|---|---|
-| `atom.create` | hash | `{"gzip_size": 412}` |
-| `atom.delete` | hash | `{}` |
-| `rel.create` | from:to | `{"kind": "tests"}` |
-| `eval.set` | test:target | `{"expected_outcome": "violates_intent"}` |
-| `goal.done` | goal name | `{}` |
-| `goal.create` | goal name | `{"weight": 0.8}` |
+| op            | subject     | detail example                            |
+| ------------- | ----------- | ----------------------------------------- |
+| `atom.create` | hash        | `{"gzip_size": 412}`                      |
+| `atom.delete` | hash        | `{}`                                      |
+| `rel.create`  | from:to     | `{"kind": "tests"}`                       |
+| `eval.set`    | test:target | `{"expected_outcome": "violates_intent"}` |
+| `goal.done`   | goal name   | `{}`                                      |
+| `goal.create` | goal name   | `{"weight": 0.8}`                         |
 
 Join back to source tables for full content.
 
@@ -219,11 +217,11 @@ CREATE VIRTUAL TABLE atoms_fts USING fts5(
 );
 ```
 
-FTS5 full-text index on atom source code. Complements embedding search
-on descriptions. Kept in sync via triggers on atoms INSERT/DELETE.
+FTS5 full-text index on atom source code. Complements embedding search on
+descriptions. Kept in sync via triggers on atoms INSERT/DELETE.
 
-Embedding search answers "find atoms that do X" (natural language).
-FTS5 search answers "find atoms containing this code pattern" (literal).
+Embedding search answers "find atoms that do X" (natural language). FTS5 search
+answers "find atoms containing this code pattern" (literal).
 
 ---
 
@@ -238,7 +236,7 @@ CREATE TABLE schema_version (
 -- Seeded with a single row on first creation.
 ```
 
-Checked on server startup. If the DB version is ahead of the server,
-fail with a clear error ("database is schema version N, server supports
-up to M — upgrade the server"). If behind, run migrations forward.
-Single row, never deleted — only updated.
+Checked on server startup. If the DB version is ahead of the server, fail with a
+clear error ("database is schema version N, server supports up to M — upgrade
+the server"). If behind, run migrations forward. Single row, never deleted —
+only updated.

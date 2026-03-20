@@ -1,9 +1,9 @@
 # zettelkasten.ts
 
 A persistent, content-addressed code knowledge base for AI agents. Atoms —
-immutable TypeScript modules, each with exactly one export — accumulate in
-a SQLite-backed corpus. Agents build on what exists rather than rebuilding
-from scratch. The corpus compounds.
+immutable TypeScript modules, each with exactly one export — accumulate in a
+SQLite-backed corpus. Agents build on what exists rather than rebuilding from
+scratch. The corpus compounds.
 
 ---
 
@@ -26,10 +26,10 @@ Internet
                      Unsafe locally, safe externally.
 ```
 
-Four containers, one compose file. The corpus is the server's private
-SQLite database — agents interact exclusively through the HTTP API and CLI.
-Ollama runs inside the zts-server container for embedding generation.
-The server also hosts a web UI at `/ui/` for operators.
+Four containers, one compose file. The corpus is the server's private SQLite
+database — agents interact exclusively through the HTTP API and CLI. Ollama runs
+inside the zts-server container for embedding generation. The server also hosts
+a web UI at `/ui/` for operators.
 
 ---
 
@@ -71,9 +71,9 @@ ZTS_TEST_TIMEOUT=30   # checker per-test wall-clock limit, seconds
 
 ## Atom model
 
-An atom is a single TypeScript module with exactly one value export. Atoms
-are identified by a 25-character base36 keccak-256 hash and stored in SQLite.
-The URL path `a/xx/yy/<21chars>.ts` is a display convention, not a filesystem
+An atom is a single TypeScript module with exactly one value export. Atoms are
+identified by a 25-character base36 keccak-256 hash and stored in SQLite. The
+URL path `a/xx/yy/<21chars>.ts` is a display convention, not a filesystem
 location.
 
 **Rules (enforced at submission):**
@@ -81,18 +81,18 @@ location.
 1. Exactly one value export — function, class, const, or enum. Named only;
    `export default` is forbidden. Type-only exports (`export type`,
    `export interface`) do not count.
-2. Only relative atom imports — `../../xx/yy/<21chars>.ts`. No npm, no JSR,
-   no URLs, no bare specifiers.
+2. Only relative atom imports — `../../xx/yy/<21chars>.ts`. No npm, no JSR, no
+   URLs, no bare specifiers.
 3. No exported `let` — exports must be `const`, function, class, or enum.
-4. Size limit — 1024 bytes gzipped after minification. Write clean,
-   readable code; the server minifies before checking. If the atom exceeds
-   the limit, the server will tell you the measured size and remind you to
-   split at natural boundaries — not to sacrifice readability.
-5. Description required — every atom must be described at submission time.
-   Use `--no-description` to opt out explicitly.
+4. Size limit — 1024 bytes gzipped after minification. Write clean, readable
+   code; the server minifies before checking. If the atom exceeds the limit, the
+   server will tell you the measured size and remind you to split at natural
+   boundaries — not to sacrifice readability.
+5. Description required — every atom must be described at submission time. Use
+   `--no-description` to opt out explicitly.
 
-**Description comment convention:** the first line(s) of every atom must be
-a comment containing the description, identical to what is passed via `-d`.
+**Description comment convention:** the first line(s) of every atom must be a
+comment containing the description, identical to what is passed via `-d`.
 Comments are stripped by the minifier and do not count toward the size limit.
 This makes the source self-documenting when viewed outside of search context.
 
@@ -103,8 +103,8 @@ export function gcd(a: number, b: number): number { ... }
 ```
 
 **Cap convention:** atoms that need external capabilities (I/O, time,
-randomness, fetch) accept them as an explicit `cap` first argument and
-export a `Cap` type. Tests substitute only what they need.
+randomness, fetch) accept them as an explicit `cap` first argument and export a
+`Cap` type. Tests substitute only what they need.
 
 ```typescript
 export type Cap = {
@@ -118,8 +118,8 @@ export function main(cap: Cap): void { ... }
 
 ## CLI reference
 
-The `zts` CLI requires `ZTS_SERVER_URL` (default: `http://localhost:8000`)
-and, for write operations, `ZTS_DEV_TOKEN`. Admin operations require
+The `zts` CLI requires `ZTS_SERVER_URL` (default: `http://localhost:8000`) and,
+for write operations, `ZTS_DEV_TOKEN`. Admin operations require
 `ZTS_ADMIN_TOKEN`.
 
 ### Corpus
@@ -372,9 +372,8 @@ zts fail <repro-hash> <broken-hash>
 zts dependents <broken-hash>
 ```
 
-`zts exec` warns before running an atom with `violates_intent` evidence
-and gives a softer notice for `falls_short`. Use `--allow-failures` to
-suppress.
+`zts exec` warns before running an atom with `violates_intent` evidence and
+gives a softer notice for `falls_short`. Use `--allow-failures` to suppress.
 
 ### Version lineage
 
@@ -390,7 +389,8 @@ zts tops <hash> --all  # full lineage
 
 All endpoints at `http://localhost:8000` by default.
 
-**Access tiers:** admin >= dev >= unauthed. Pass `Authorization: Bearer <token>`.
+**Access tiers:** admin >= dev >= unauthed. Pass
+`Authorization: Bearer <token>`.
 
 ### Unauthed
 
@@ -448,18 +448,17 @@ DELETE /goals/<id>                         delete goal and comments
 
 ## Security model
 
-**No corpus code runs in the server or CLI process.** `zts exec` and
-`zts test` spawn isolated Deno subprocesses with inherited stdio. The
-subprocess gets `--allow-import=<server-origin>` plus any explicitly
-requested permissions.
+**No corpus code runs in the server or CLI process.** `zts exec` and `zts test`
+spawn isolated Deno subprocesses with inherited stdio. The subprocess gets
+`--allow-import=<server-origin>` plus any explicitly requested permissions.
 
-**The checker is the sole authoritative executor.** Dedicated container,
-no internet, no corpus volume, hard resource limits. Every test execution
-is treated as potentially adversarial.
+**The checker is the sole authoritative executor.** Dedicated container, no
+internet, no corpus volume, hard resource limits. Every test execution is
+treated as potentially adversarial.
 
-**Agent containers receive `ZTS_DEV_TOKEN` only** — never the admin token.
-The gateway restricts the agent to `api.anthropic.com`. The corpus
-database is not mounted in the agent container.
+**Agent containers receive `ZTS_DEV_TOKEN` only** — never the admin token. The
+gateway restricts the agent to `api.anthropic.com`. The corpus database is not
+mounted in the agent container.
 
 ---
 
@@ -480,8 +479,8 @@ Served by zts-server at `/ui/`. No separate frontend container.
 /ui/log             audit log — filterable write operation history
 ```
 
-Auth: same bearer tokens as the API, stored in browser. Read-only views
-work without login. Dev token enables writes. Admin token enables goal CRUD.
+Auth: same bearer tokens as the API, stored in browser. Read-only views work
+without login. Dev token enables writes. Admin token enables goal CRUD.
 
 ---
 
@@ -495,42 +494,42 @@ headers. The CLI rejects non-ASCII before sending. Spell out "phi", "->",
 
 ## Notes for agents
 
-- **Search before building.** Use `zts search`, `zts search --code`,
-  `zts info`, `zts tops`. Many building blocks already exist.
-- **Description is required** — use `-d` on `zts post`. The description
-  is embedded for search. A good description makes the atom discoverable.
-  See the description writing guide below.
-- **TypeScript type annotations count toward the gzip budget.** The
-  minifier does not strip them.
-- **Use `127.0.0.1` not `localhost` for Deno TCP.** Deno resolves
-  `localhost` to IPv6 (`::1`) in many environments.
-- **Mark supersedes proactively.** When your atom improves on an existing
-  one, register it. Future agents navigating the lineage depend on this.
-- **Your local test results are not authoritative.** Only checker runs
-  affect corpus state.
-- **`-t` is strict — fix, don't override.** The test gate checks the
-  full transitive dependency tree. If a dep lacks test coverage, prefer
-  adding a test for it over using `--allow-untested-deps`. The override
-  exists for incremental migration, not as standard workflow.
+- **Search before building.** Use `zts search`, `zts search --code`, `zts info`,
+  `zts tops`. Many building blocks already exist.
+- **Description is required** — use `-d` on `zts post`. The description is
+  embedded for search. A good description makes the atom discoverable. See the
+  description writing guide below.
+- **TypeScript type annotations count toward the gzip budget.** The minifier
+  does not strip them.
+- **Use `127.0.0.1` not `localhost` for Deno TCP.** Deno resolves `localhost` to
+  IPv6 (`::1`) in many environments.
+- **Mark supersedes proactively.** When your atom improves on an existing one,
+  register it. Future agents navigating the lineage depend on this.
+- **Your local test results are not authoritative.** Only checker runs affect
+  corpus state.
+- **`-t` is strict — fix, don't override.** The test gate checks the full
+  transitive dependency tree. If a dep lacks test coverage, prefer adding a test
+  for it over using `--allow-untested-deps`. The override exists for incremental
+  migration, not as standard workflow.
 - **Tag atoms with goals.** Use `-g <goal>` when posting. This powers
   `zts status` and `zts list --goal`.
-- **Duplicate the description as a comment** at the top of every atom.
-  Comments are stripped by the minifier — they cost nothing against the
-  size limit but make the source readable standalone.
+- **Duplicate the description as a comment** at the top of every atom. Comments
+  are stripped by the minifier — they cost nothing against the size limit but
+  make the source readable standalone.
 
 ### Writing descriptions
 
 Descriptions are embedded with a text model and matched against natural-
-language queries. Cover: what it computes or does, inputs and outputs,
-edge cases, non-obvious behavior from dependencies. Use plain English. Do
-not mention TypeScript, exports, or import paths.
+language queries. Cover: what it computes or does, inputs and outputs, edge
+cases, non-obvious behavior from dependencies. Use plain English. Do not mention
+TypeScript, exports, or import paths.
 
 **Good:**
 
-| Atom | Description |
-|---|---|
-| gcd | Computes the greatest common divisor of two integers using the Euclidean algorithm. Always returns a non-negative value. |
-| isPrime | Returns true if a positive integer is prime using trial division up to its square root. Returns false for integers less than 2. |
+| Atom            | Description                                                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| gcd             | Computes the greatest common divisor of two integers using the Euclidean algorithm. Always returns a non-negative value.            |
+| isPrime         | Returns true if a positive integer is prime using trial division up to its square root. Returns false for integers less than 2.     |
 | main (fraction) | Reads a fraction from args in "a/b" format, simplifies by dividing both by their GCD, prints the result. Rejects zero denominators. |
 
 **Bad:**

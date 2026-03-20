@@ -2,15 +2,15 @@
 
 ## What was observed
 
-Agents have no way to enumerate the corpus. There is no `/list` endpoint and
-no `zts list` command. The only discovery path is semantic search — which
-requires knowing approximately what vocabulary to use.
+Agents have no way to enumerate the corpus. There is no `/list` endpoint and no
+`zts list` command. The only discovery path is semantic search — which requires
+knowing approximately what vocabulary to use.
 
 This creates a blind spot: an agent building "a Huffman encoder" may not find
-the existing `huffmanCoding` atom because it searched for "Huffman compress"
-or "variable-length code." Both agents across the bricklane and starling
-channels maintained hand-crafted atom inventory tables in their handover docs
-— a clear signal that the system wasn't providing this information.
+the existing `huffmanCoding` atom because it searched for "Huffman compress" or
+"variable-length code." Both agents across the bricklane and starling channels
+maintained hand-crafted atom inventory tables in their handover docs — a clear
+signal that the system wasn't providing this information.
 
 The consequences, observed repeatedly:
 
@@ -21,8 +21,8 @@ The consequences, observed repeatedly:
 
 - **Context burned on inventory.** By the 150th bricklane iteration, the
   handover's "what already exists" section listed 30+ SVG atoms with version
-  numbers. This information had to be reconstructed every iteration from
-  memory and search, consuming significant context window.
+  numbers. This information had to be reconstructed every iteration from memory
+  and search, consuming significant context window.
 
 - **Wasted work from misses.** Agents expressed explicit uncertainty: "I
   searched three ways and felt confident it was missing — but couldn't be
@@ -32,14 +32,14 @@ The consequences, observed repeatedly:
 ## Why it matters
 
 The system is designed around accumulation. Each atom is supposed to be a
-permanent asset a future agent can build on. That only works if the future
-agent can find it. A corpus that grows but remains opaque provides diminishing
+permanent asset a future agent can build on. That only works if the future agent
+can find it. A corpus that grows but remains opaque provides diminishing
 returns: the more atoms there are, the harder it is to know what's there.
 
 ## What good looks like
 
-An agent should be able to answer "what do I already have related to X?" with
-a complete answer, not a probabilistic one. This means both:
+An agent should be able to answer "what do I already have related to X?" with a
+complete answer, not a probabilistic one. This means both:
 
 1. A way to enumerate atoms (all, or filtered by some criterion)
 2. Relationship-based navigation ("what atoms import this one?", "what atoms
@@ -72,10 +72,10 @@ information automatically. The maintenance burden grew with the corpus.
 
 - `zts search` returns semantic neighbors, which is good for discovery but
   unreliable for "does this exact thing exist?" Both are needed.
-- Atoms with poor descriptions are invisible to search and get reinvented.
-  There is no feedback signal for "this atom is never found by search but is
+- Atoms with poor descriptions are invisible to search and get reinvented. There
+  is no feedback signal for "this atom is never found by search but is
   frequently retrieved by hash" — which would identify descriptions that need
   rework.
-- The capability/interface of an atom is not indexed. There is no way to
-  search for "atoms that export a function taking (Uint8Array) → number" —
-  only prose descriptions.
+- The capability/interface of an atom is not indexed. There is no way to search
+  for "atoms that export a function taking (Uint8Array) → number" — only prose
+  descriptions.

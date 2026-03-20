@@ -2,8 +2,8 @@
 
 ## The mistake
 
-The first trial ran agents inside the zts project directory. This was wrong
-in several ways:
+The first trial ran agents inside the zts project directory. This was wrong in
+several ways:
 
 - Agents had direct filesystem access to the corpus git repo
   (`~/.local/share/zettelkasten/`) and could read or write atom files without
@@ -25,6 +25,7 @@ the DB) that should only be done via the CLI.
 **zts runs on a separate server.** The agent workspace has no visibility into
 the corpus filesystem, the SQLite DB, or the zts source code. The only
 interfaces are:
+
 - `zts` CLI (preferred)
 - HTTP API via `curl` (acceptable fallback, but discouraged — the CLI should
   cover everything an agent needs)
@@ -36,9 +37,9 @@ Agents interact with it as users, not as administrators.
 
 The agent loop script, the per-iteration prompt, and the goal tracking system
 are features of the zts tool — not loose files the operator maintains
-separately. They should ship with zts and be invokable via CLI subcommands.
-This makes the agent loop a first-class feature, versioned and distributed
-with the tool.
+separately. They should ship with zts and be invokable via CLI subcommands. This
+makes the agent loop a first-class feature, versioned and distributed with the
+tool.
 
 ## The agent workspace
 
@@ -55,15 +56,15 @@ workspace/
 
 The `handovers/` directory is managed by the loop runner (`zts script worker`):
 it promotes `next.md` → `current.md` after each iteration. The agent reads
-`handovers/current.md` at start and writes `handovers/next.md` before exit.
-The workspace is fully self-contained — no external handover directory needed.
+`handovers/current.md` at start and writes `handovers/next.md` before exit. The
+workspace is fully self-contained — no external handover directory needed.
 
 ## Notes system
 
 `workspace/notes/` accumulates across iterations, unlike handovers which are
 per-iteration state transfers. Notes are for longer-lived observations,
-patterns, and decisions that are worth carrying forward but don't belong in
-the handover.
+patterns, and decisions that are worth carrying forward but don't belong in the
+handover.
 
 ### Philosophy
 
@@ -88,13 +89,13 @@ notes/
                        separating; merged back into current.md when resolved
 ```
 
-`current.md` is the single most important file. It should answer: "if I woke
-up with no memory, what would I need to know right now?" Keep it short — a
-few paragraphs at most. Prune it when it gets stale.
+`current.md` is the single most important file. It should answer: "if I woke up
+with no memory, what would I need to know right now?" Keep it short — a few
+paragraphs at most. Prune it when it gets stale.
 
 Topic files are created deliberately, not by default. Most observations belong
-in `current.md` or the handover. A topic file earns its existence when the
-same concern recurs across multiple iterations.
+in `current.md` or the handover. A topic file earns its existence when the same
+concern recurs across multiple iterations.
 
 ## Goal tracking
 
