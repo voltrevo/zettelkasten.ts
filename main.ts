@@ -268,7 +268,7 @@ switch (command) {
       "  goal pick|show|list|done|undone|comment|comments  goal commands",
     );
     console.error(
-      "  admin goal add|set|list|delete   admin goal management",
+      "  admin goal add|set|delete        admin goal management",
     );
     console.error(
       "  status [--since YYYY-MM-DD]  corpus health summary",
@@ -893,22 +893,28 @@ async function cmdGoal(rest: string[]): Promise<void> {
       }
     }
   } else if (sub === "list") {
-    const res = await fetch(`${BASE_URL}/goals`);
+    const url = new URL(`${BASE_URL}/goals`);
+    if (args.done) url.searchParams.set("done", "1");
+    if (args.all) url.searchParams.set("all", "1");
+    const res = await fetch(url);
     if (!res.ok) {
       console.error(`error: ${res.status} ${await res.text()}`);
       Deno.exit(1);
     }
     const goals = await res.json() as Array<{
       name: string;
+      weight: number;
+      done: boolean;
       body: string;
     }>;
     if (goals.length === 0) {
-      console.log("no active goals");
+      console.log("no goals");
       return;
     }
     for (const g of goals) {
+      const status = g.done ? " [done]" : "";
       const firstLine = g.body ? g.body.split("\n")[0] : "";
-      console.log(`${g.name}  ${firstLine}`);
+      console.log(`${g.name}  weight=${g.weight}${status}  ${firstLine}`);
     }
   } else if (sub === "done") {
     const name = rest[1];
@@ -991,7 +997,7 @@ async function cmdAdmin(rest: string[]): Promise<void> {
   const resource = rest[0];
   const sub = rest[1];
   if (resource !== "goal") {
-    console.error("usage: zts admin goal <add|set|list|delete> ...");
+    console.error("usage: zts admin goal <add|set|delete> ...");
     Deno.exit(1);
   }
   if (sub === "add") {
@@ -1037,29 +1043,6 @@ async function cmdAdmin(rest: string[]): Promise<void> {
       Deno.exit(1);
     }
     console.log("ok");
-  } else if (sub === "list") {
-    const url = new URL(`${BASE_URL}/goals`);
-    if (args.done) url.searchParams.set("done", "1");
-    if (args.all) url.searchParams.set("all", "1");
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
-    }
-    const goals = await res.json() as Array<{
-      name: string;
-      weight: number;
-      done: boolean;
-      body: string;
-    }>;
-    if (goals.length === 0) {
-      console.log("no goals");
-      return;
-    }
-    for (const g of goals) {
-      const status = g.done ? " [done]" : "";
-      console.log(`${g.name}  weight=${g.weight}${status}`);
-    }
   } else if (sub === "delete") {
     const name = rest[2];
     if (!name) {
@@ -1076,7 +1059,7 @@ async function cmdAdmin(rest: string[]): Promise<void> {
       Deno.exit(1);
     }
   } else {
-    console.error("usage: zts admin goal <add|set|list|delete> ...");
+    console.error("usage: zts admin goal <add|set|delete> ...");
     Deno.exit(1);
   }
 }
