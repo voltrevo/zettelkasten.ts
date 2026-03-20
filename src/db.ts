@@ -1,10 +1,26 @@
 import { Database } from "@db/sqlite";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS goals (
+  id         INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  weight     REAL NOT NULL DEFAULT 0.5,
+  done       INTEGER NOT NULL DEFAULT 0,
+  body       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS goal_comments (
+  id         INTEGER PRIMARY KEY,
+  goal_id    INTEGER NOT NULL REFERENCES goals(id),
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS atoms (
@@ -12,7 +28,7 @@ CREATE TABLE IF NOT EXISTS atoms (
   source      TEXT NOT NULL,
   gzip_size   INTEGER NOT NULL,
   description TEXT NOT NULL,
-  goal        TEXT,
+  goal        TEXT REFERENCES goals(name),
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -125,6 +141,21 @@ export interface TestRun {
   ranAt: string;
 }
 
+export interface Goal {
+  id: number;
+  name: string;
+  weight: number;
+  done: boolean;
+  body: string;
+  createdAt: string;
+}
+
+export interface GoalComment {
+  id: number;
+  body: string;
+  createdAt: string;
+}
+
 export interface LogEntry {
   op: string;
   subject?: string;
@@ -162,8 +193,50 @@ export class Db {
       throw new Error(
         `Database is schema version ${row.version}, server supports up to ${SCHEMA_VERSION}. Upgrade the server.`,
       );
+    } else if (row.version < SCHEMA_VERSION) {
+      this.runMigrations(row.version);
     }
-    // Future: run migrations if row.version < SCHEMA_VERSION
+  }
+
+  private runMigrations(fromVersion: number): void {
+    if (fromVersion < 2) {
+      // v1→v2: add goals tables, recreate atoms with FK to goals
+      console.log("Migrating schema v1 → v2...");
+      this.db.exec("PRAGMA foreign_keys=OFF");
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS goals (
+          id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+          weight REAL NOT NULL DEFAULT 0.5, done INTEGER NOT NULL DEFAULT 0,
+          body TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS goal_comments (
+          id INTEGER PRIMARY KEY, goal_id INTEGER NOT NULL REFERENCES goals(id),
+          body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE atoms_new (
+          hash TEXT PRIMARY KEY, source TEXT NOT NULL, gzip_size INTEGER NOT NULL,
+          description TEXT NOT NULL, goal TEXT REFERENCES goals(name),
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO atoms_new SELECT hash, source, gzip_size, description, goal, created_at FROM atoms;
+        DROP TABLE atoms;
+        ALTER TABLE atoms_new RENAME TO atoms;
+      `);
+      // Recreate FTS triggers (they reference atoms which was recreated)
+      this.db.exec(`
+        DROP TRIGGER IF EXISTS atoms_fts_insert;
+        DROP TRIGGER IF EXISTS atoms_fts_delete;
+        CREATE TRIGGER atoms_fts_insert AFTER INSERT ON atoms BEGIN
+          INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
+        END;
+        CREATE TRIGGER atoms_fts_delete AFTER DELETE ON atoms BEGIN
+          INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
+        END;
+      `);
+      this.db.exec("PRAGMA foreign_keys=ON");
+      this.db.prepare("UPDATE schema_version SET version = ?").run(2);
+      console.log("Schema v2 migration complete.");
+    }
   }
 
   // --- Hash resolution ---
@@ -713,6 +786,175 @@ export class Db {
   /** Rebuild the FTS index from all atoms. Call after migration. */
   rebuildFts(): void {
     this.db.exec("INSERT INTO atoms_fts(atoms_fts) VALUES ('rebuild')");
+  }
+
+  // --- Goals ---
+
+  private rowToGoal(r: {
+    id: number;
+    name: string;
+    weight: number;
+    done: number;
+    body: string;
+    created_at: string;
+  }): Goal {
+    return {
+      id: r.id,
+      name: r.name,
+      weight: r.weight,
+      done: r.done === 1,
+      body: r.body,
+      createdAt: r.created_at,
+    };
+  }
+
+  createGoal(
+    name: string,
+    weight: number = 0.5,
+    body: string = "",
+  ): Goal {
+    this.db.prepare(
+      "INSERT INTO goals (name, weight, body) VALUES (?, ?, ?)",
+    ).run(name, weight, body);
+    return this.getGoal(name)!;
+  }
+
+  getGoal(name: string): Goal | null {
+    const row = this.db.prepare(
+      "SELECT id, name, weight, done, body, created_at FROM goals WHERE name = ?",
+    ).get<{
+      id: number;
+      name: string;
+      weight: number;
+      done: number;
+      body: string;
+      created_at: string;
+    }>(name);
+    if (!row) return null;
+    return this.rowToGoal(row);
+  }
+
+  listGoals(opts: {
+    done?: boolean;
+    all?: boolean;
+  } = {}): Goal[] {
+    let sql = "SELECT id, name, weight, done, body, created_at FROM goals";
+    if (!opts.all) {
+      if (opts.done) {
+        sql += " WHERE done = 1";
+      } else {
+        sql += " WHERE done = 0";
+      }
+    }
+    sql += " ORDER BY weight DESC, name ASC";
+    return this.db.prepare(sql).all<{
+      id: number;
+      name: string;
+      weight: number;
+      done: number;
+      body: string;
+      created_at: string;
+    }>().map((r) => this.rowToGoal(r));
+  }
+
+  /** Weighted random sample of non-done goals. */
+  pickGoals(n: number = 1): Goal[] {
+    const goals = this.listGoals();
+    if (goals.length === 0) return [];
+    // Weighted random sampling without replacement
+    const picked: Goal[] = [];
+    const remaining = [...goals];
+    for (let i = 0; i < n && remaining.length > 0; i++) {
+      const totalWeight = remaining.reduce((s, g) => s + g.weight, 0);
+      let r = Math.random() * totalWeight;
+      let idx = 0;
+      for (; idx < remaining.length - 1; idx++) {
+        r -= remaining[idx].weight;
+        if (r <= 0) break;
+      }
+      picked.push(remaining[idx]);
+      remaining.splice(idx, 1);
+    }
+    return picked;
+  }
+
+  updateGoal(
+    name: string,
+    updates: { weight?: number; body?: string },
+  ): boolean {
+    const sets: string[] = [];
+    const params: (string | number)[] = [];
+    if (updates.weight !== undefined) {
+      sets.push("weight = ?");
+      params.push(updates.weight);
+    }
+    if (updates.body !== undefined) {
+      sets.push("body = ?");
+      params.push(updates.body);
+    }
+    if (sets.length === 0) return false;
+    params.push(name);
+    const changes = this.db.prepare(
+      `UPDATE goals SET ${sets.join(", ")} WHERE name = ?`,
+    ).run(...params);
+    return changes > 0;
+  }
+
+  deleteGoal(name: string): boolean {
+    const goal = this.getGoal(name);
+    if (!goal) return false;
+    this.db.prepare("DELETE FROM goal_comments WHERE goal_id = ?").run(goal.id);
+    const changes = this.db.prepare("DELETE FROM goals WHERE name = ?").run(
+      name,
+    );
+    return changes > 0;
+  }
+
+  markGoalDone(name: string): boolean {
+    const changes = this.db.prepare(
+      "UPDATE goals SET done = 1 WHERE name = ?",
+    ).run(name);
+    return changes > 0;
+  }
+
+  markGoalUndone(name: string): boolean {
+    const changes = this.db.prepare(
+      "UPDATE goals SET done = 0 WHERE name = ?",
+    ).run(name);
+    return changes > 0;
+  }
+
+  addGoalComment(name: string, body: string): boolean {
+    const goal = this.getGoal(name);
+    if (!goal) return false;
+    this.db.prepare(
+      "INSERT INTO goal_comments (goal_id, body) VALUES (?, ?)",
+    ).run(goal.id, body);
+    return true;
+  }
+
+  getGoalComments(name: string, recent?: number): GoalComment[] {
+    const goal = this.getGoal(name);
+    if (!goal) return [];
+    const limit = recent ? `LIMIT ?` : "";
+    const params: (number)[] = [goal.id];
+    if (recent) params.push(recent);
+    return this.db.prepare(
+      `SELECT id, body, created_at FROM goal_comments WHERE goal_id = ? ORDER BY id DESC ${limit}`,
+    ).all<{ id: number; body: string; created_at: string }>(...params).map(
+      (r) => ({
+        id: r.id,
+        body: r.body,
+        createdAt: r.created_at,
+      }),
+    );
+  }
+
+  goalExists(name: string): boolean {
+    const row = this.db.prepare(
+      "SELECT 1 FROM goals WHERE name = ?",
+    ).get<{ "1": number }>(name);
+    return row !== undefined;
   }
 
   // --- Lifecycle ---

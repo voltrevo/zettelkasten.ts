@@ -30,6 +30,7 @@ Deno.test("Db: insertAtom and getAtom round-trip", () => {
 
 Deno.test("Db: insertAtom with goal", () => {
   const d = makeDb();
+  d.createGoal("my-goal");
   d.insertAtom(HASH_A, "export const x = 1;", 42, "test atom", "my-goal");
   const atom = d.getAtom(HASH_A);
   assertEquals(atom?.goal, "my-goal");
@@ -253,6 +254,7 @@ Deno.test("Db: listAtoms with recent limit", () => {
 
 Deno.test("Db: listAtoms filters by goal", () => {
   const d = makeDb();
+  d.createGoal("my-goal");
   d.insertAtom(HASH_A, "src", 10, "first", "my-goal");
   d.insertAtom(HASH_B, "src", 20, "second");
   const atoms = d.listAtoms({ goal: "my-goal" });
@@ -545,6 +547,111 @@ Deno.test("Db: searchSource returns empty for no match", () => {
   d.insertAtom(HASH_A, "export const x = 1;", 30, "x");
   const hits = d.searchSource("nonexistent", 10);
   assertEquals(hits.length, 0);
+  d.close();
+});
+
+// --- Goals ---
+
+Deno.test("Db: createGoal and getGoal", () => {
+  const d = makeDb();
+  const g = d.createGoal("test-goal", 0.8, "goal body");
+  assertEquals(g.name, "test-goal");
+  assertEquals(g.weight, 0.8);
+  assertEquals(g.body, "goal body");
+  assertEquals(g.done, false);
+  const fetched = d.getGoal("test-goal");
+  assertEquals(fetched?.name, "test-goal");
+  d.close();
+});
+
+Deno.test("Db: listGoals excludes done by default", () => {
+  const d = makeDb();
+  d.createGoal("active", 0.5);
+  d.createGoal("finished", 0.5);
+  d.markGoalDone("finished");
+  const goals = d.listGoals();
+  assertEquals(goals.length, 1);
+  assertEquals(goals[0].name, "active");
+  d.close();
+});
+
+Deno.test("Db: listGoals with all flag", () => {
+  const d = makeDb();
+  d.createGoal("a", 0.5);
+  d.createGoal("b", 0.5);
+  d.markGoalDone("b");
+  assertEquals(d.listGoals({ all: true }).length, 2);
+  d.close();
+});
+
+Deno.test("Db: markGoalDone and markGoalUndone", () => {
+  const d = makeDb();
+  d.createGoal("g", 0.5);
+  d.markGoalDone("g");
+  assertEquals(d.getGoal("g")?.done, true);
+  d.markGoalUndone("g");
+  assertEquals(d.getGoal("g")?.done, false);
+  d.close();
+});
+
+Deno.test("Db: updateGoal", () => {
+  const d = makeDb();
+  d.createGoal("g", 0.5, "old body");
+  d.updateGoal("g", { weight: 0.9, body: "new body" });
+  const g = d.getGoal("g");
+  assertEquals(g?.weight, 0.9);
+  assertEquals(g?.body, "new body");
+  d.close();
+});
+
+Deno.test("Db: deleteGoal removes goal and comments", () => {
+  const d = makeDb();
+  d.createGoal("g", 0.5);
+  d.addGoalComment("g", "comment 1");
+  assertEquals(d.deleteGoal("g"), true);
+  assertEquals(d.getGoal("g"), null);
+  assertEquals(d.deleteGoal("g"), false);
+  d.close();
+});
+
+Deno.test("Db: addGoalComment and getGoalComments", () => {
+  const d = makeDb();
+  d.createGoal("g", 0.5);
+  d.addGoalComment("g", "first");
+  d.addGoalComment("g", "second");
+  const comments = d.getGoalComments("g");
+  assertEquals(comments.length, 2);
+  // most recent first
+  assertEquals(comments[0].body, "second");
+  d.close();
+});
+
+Deno.test("Db: getGoalComments with recent limit", () => {
+  const d = makeDb();
+  d.createGoal("g", 0.5);
+  d.addGoalComment("g", "a");
+  d.addGoalComment("g", "b");
+  d.addGoalComment("g", "c");
+  const comments = d.getGoalComments("g", 2);
+  assertEquals(comments.length, 2);
+  d.close();
+});
+
+Deno.test("Db: pickGoals returns weighted sample", () => {
+  const d = makeDb();
+  d.createGoal("heavy", 1.0);
+  d.createGoal("light", 0.1);
+  // Just verify it returns goals without crashing
+  const picked = d.pickGoals(1);
+  assertEquals(picked.length, 1);
+  d.close();
+});
+
+Deno.test("Db: goalExists", () => {
+  const d = makeDb();
+  assertEquals(d.goalExists("nope"), false);
+  d.createGoal("yes", 0.5);
+  assertEquals(d.goalExists("yes"), true);
   d.close();
 });
 

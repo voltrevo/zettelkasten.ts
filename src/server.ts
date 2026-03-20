@@ -217,6 +217,9 @@ async function route(req: Request): Promise<Response> {
       );
     }
     const goal = req.headers.get("x-goal") || undefined;
+    if (goal && !db.goalExists(goal)) {
+      return new Response(`Goal not found: ${goal}`, { status: 400 });
+    }
     const content = await req.text();
     if (!content) {
       return new Response("Empty content", { status: 400 });
@@ -930,6 +933,151 @@ async function route(req: Request): Promise<Response> {
     return new Response(JSON.stringify(rows), {
       headers: { "content-type": "application/json" },
     });
+  }
+
+  // --- Goals ---
+
+  // GET /goals — list non-done goals
+  if (req.method === "GET" && path === "/goals") {
+    const done = url.searchParams.get("done") === "1";
+    const all = url.searchParams.get("all") === "1";
+    const goals = db.listGoals({ done, all });
+    return new Response(JSON.stringify(goals), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // GET /goals/<name> — goal body + comments
+  if (req.method === "GET") {
+    const goalMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)$/);
+    if (goalMatch) {
+      const goal = db.getGoal(goalMatch[1]);
+      if (!goal) return new Response("Goal not found", { status: 404 });
+      const comments = db.getGoalComments(goal.name);
+      return new Response(JSON.stringify({ ...goal, comments }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
+  // GET /goals/<name>/comments?recent=N — read comments
+  if (req.method === "GET") {
+    const commentMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)\/comments$/);
+    if (commentMatch) {
+      const recentParam = url.searchParams.get("recent");
+      const comments = db.getGoalComments(
+        commentMatch[1],
+        recentParam ? parseInt(recentParam, 10) : undefined,
+      );
+      return new Response(JSON.stringify(comments), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
+  // POST /goals — create goal (admin)
+  if (req.method === "POST" && path === "/goals") {
+    let body: { name?: string; weight?: number; body?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    if (!body.name) {
+      return new Response("Missing name", { status: 400 });
+    }
+    if (db.goalExists(body.name)) {
+      return new Response("Goal already exists", { status: 409 });
+    }
+    const goal = db.createGoal(body.name, body.weight, body.body);
+    db.insertLog({
+      op: "goal.create",
+      subject: goal.name,
+      detail: JSON.stringify({ weight: goal.weight }),
+    });
+    return new Response(JSON.stringify(goal), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // PATCH /goals/<name> — update goal (admin)
+  if (req.method === "PATCH") {
+    const goalMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)$/);
+    if (goalMatch) {
+      let body: { weight?: number; body?: string };
+      try {
+        body = await req.json();
+      } catch {
+        return new Response("Invalid JSON", { status: 400 });
+      }
+      if (!db.updateGoal(goalMatch[1], body)) {
+        return new Response("Goal not found", { status: 404 });
+      }
+      db.insertLog({ op: "goal.update", subject: goalMatch[1] });
+      return new Response("ok\n", {
+        headers: { "content-type": "text/plain" },
+      });
+    }
+  }
+
+  // DELETE /goals/<name> — delete goal + comments (admin)
+  if (req.method === "DELETE") {
+    const goalMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)$/);
+    if (goalMatch) {
+      if (!db.deleteGoal(goalMatch[1])) {
+        return new Response("Goal not found", { status: 404 });
+      }
+      db.insertLog({ op: "goal.delete", subject: goalMatch[1] });
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  // POST /goals/<name>/done — mark done
+  if (req.method === "POST") {
+    const doneMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)\/done$/);
+    if (doneMatch) {
+      if (!db.markGoalDone(doneMatch[1])) {
+        return new Response("Goal not found", { status: 404 });
+      }
+      db.insertLog({ op: "goal.done", subject: doneMatch[1] });
+      return new Response("ok\n", {
+        headers: { "content-type": "text/plain" },
+      });
+    }
+  }
+
+  // POST /goals/<name>/undone — mark undone
+  if (req.method === "POST") {
+    const undoneMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)\/undone$/);
+    if (undoneMatch) {
+      if (!db.markGoalUndone(undoneMatch[1])) {
+        return new Response("Goal not found", { status: 404 });
+      }
+      db.insertLog({ op: "goal.undone", subject: undoneMatch[1] });
+      return new Response("ok\n", {
+        headers: { "content-type": "text/plain" },
+      });
+    }
+  }
+
+  // POST /goals/<name>/comments — append comment
+  if (req.method === "POST") {
+    const commentMatch = path.match(
+      /^\/goals\/([a-zA-Z0-9_-]+)\/comments$/,
+    );
+    if (commentMatch) {
+      const body = (await req.text()).trim();
+      if (!body) return new Response("Empty comment", { status: 400 });
+      if (!db.addGoalComment(commentMatch[1], body)) {
+        return new Response("Goal not found", { status: 404 });
+      }
+      db.insertLog({ op: "goal.comment", subject: commentMatch[1] });
+      return new Response("ok\n", {
+        status: 201,
+        headers: { "content-type": "text/plain" },
+      });
+    }
   }
 
   return new Response("Not found", { status: 404 });

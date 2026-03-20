@@ -35,8 +35,10 @@ const args = parseArgs(Deno.args, {
     "subject",
     "limit",
     "code",
+    "weight",
+    "body",
   ],
-  boolean: ["f", "no-description", "broken", "all"],
+  boolean: ["f", "no-description", "broken", "all", "done"],
   alias: {
     d: "description",
     f: "follow",
@@ -160,6 +162,14 @@ switch (command) {
     await cmdTops(rest);
     break;
 
+  case "goal":
+    await cmdGoal(rest);
+    break;
+
+  case "admin":
+    await cmdAdmin(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -248,6 +258,12 @@ switch (command) {
     );
     console.error(
       "  tops <hash> [--limit N] [--all]  navigate supersedes graph to best",
+    );
+    console.error(
+      "  goal pick|show|list|done|undone|comment|comments  goal commands",
+    );
+    console.error(
+      "  admin goal add|set|list|delete   admin goal management",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -802,6 +818,258 @@ async function cmdTops(rest: string[]): Promise<void> {
       console.log(`Depth ${currentDepth}:`);
     }
     console.log(`  ${t.hash}  ${t.description}`);
+  }
+}
+
+async function cmdGoal(rest: string[]): Promise<void> {
+  const sub = rest[0];
+  if (sub === "pick") {
+    const n = args.n ?? "1";
+    const url = new URL(`${BASE_URL}/goals`);
+    url.searchParams.set("pick", n);
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const goals = await res.json() as Array<{
+      name: string;
+      weight: number;
+      body: string;
+    }>;
+    if (goals.length === 0) {
+      console.log("no active goals");
+      return;
+    }
+    // Client-side weighted random pick from the returned list
+    const remaining = [...goals];
+    const count = Math.min(parseInt(n, 10), remaining.length);
+    for (let i = 0; i < count; i++) {
+      const totalWeight = remaining.reduce((s, g) => s + g.weight, 0);
+      let r = Math.random() * totalWeight;
+      let idx = 0;
+      for (; idx < remaining.length - 1; idx++) {
+        r -= remaining[idx].weight;
+        if (r <= 0) break;
+      }
+      const picked = remaining.splice(idx, 1)[0];
+      console.log(`${picked.name} (weight ${picked.weight})`);
+      if (picked.body) console.log(`  ${picked.body.split("\n")[0]}`);
+    }
+  } else if (sub === "show") {
+    const name = rest[1];
+    if (!name) {
+      console.error("usage: zts goal show <name>");
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/goals/${name}`);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const goal = await res.json() as {
+      name: string;
+      weight: number;
+      done: boolean;
+      body: string;
+      comments: Array<{ body: string; createdAt: string }>;
+    };
+    console.log(
+      `${goal.name} (weight ${goal.weight}${goal.done ? ", done" : ""})`,
+    );
+    if (goal.body) console.log(goal.body);
+    if (goal.comments.length > 0) {
+      console.log("\n--- comments ---");
+      for (const c of goal.comments) {
+        console.log(`[${c.createdAt}] ${c.body}`);
+      }
+    }
+  } else if (sub === "list") {
+    const res = await fetch(`${BASE_URL}/goals`);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const goals = await res.json() as Array<{
+      name: string;
+      body: string;
+    }>;
+    if (goals.length === 0) {
+      console.log("no active goals");
+      return;
+    }
+    for (const g of goals) {
+      const firstLine = g.body ? g.body.split("\n")[0] : "";
+      console.log(`${g.name}  ${firstLine}`);
+    }
+  } else if (sub === "done") {
+    const name = rest[1];
+    if (!name) {
+      console.error("usage: zts goal done <name>");
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/goals/${name}/done`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("done");
+  } else if (sub === "undone") {
+    const name = rest[1];
+    if (!name) {
+      console.error("usage: zts goal undone <name>");
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/goals/${name}/undone`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("undone");
+  } else if (sub === "comment") {
+    const name = rest[1];
+    const text = rest[2];
+    if (!name || !text) {
+      console.error('usage: zts goal comment <name> "text"');
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/goals/${name}/comments`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: text,
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("ok");
+  } else if (sub === "comments") {
+    const name = rest[1];
+    if (!name) {
+      console.error("usage: zts goal comments <name> [--recent N]");
+      Deno.exit(1);
+    }
+    const url = new URL(`${BASE_URL}/goals/${name}/comments`);
+    if (args.recent) url.searchParams.set("recent", args.recent);
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const comments = await res.json() as Array<{
+      body: string;
+      createdAt: string;
+    }>;
+    if (comments.length === 0) {
+      console.log("no comments");
+      return;
+    }
+    for (const c of comments) {
+      console.log(`[${c.createdAt}] ${c.body}`);
+    }
+  } else {
+    console.error(
+      "usage: zts goal <pick|show|list|done|undone|comment|comments> ...",
+    );
+    Deno.exit(1);
+  }
+}
+
+async function cmdAdmin(rest: string[]): Promise<void> {
+  const resource = rest[0];
+  const sub = rest[1];
+  if (resource !== "goal") {
+    console.error("usage: zts admin goal <add|set|list|delete> ...");
+    Deno.exit(1);
+  }
+  if (sub === "add") {
+    const name = rest[2];
+    if (!name) {
+      console.error(
+        'usage: zts admin goal add <name> [--weight N] [--body "text"]',
+      );
+      Deno.exit(1);
+    }
+    const payload: { name: string; weight?: number; body?: string } = { name };
+    if (args.weight) payload.weight = parseFloat(args.weight);
+    if (args.body) payload.body = args.body;
+    const res = await fetch(`${BASE_URL}/goals`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const goal = await res.json();
+    console.log(`created: ${goal.name} (weight ${goal.weight})`);
+  } else if (sub === "set") {
+    const name = rest[2];
+    if (!name) {
+      console.error(
+        'usage: zts admin goal set <name> [--weight N] [--body "text"]',
+      );
+      Deno.exit(1);
+    }
+    const payload: { weight?: number; body?: string } = {};
+    if (args.weight) payload.weight = parseFloat(args.weight);
+    if (args.body) payload.body = args.body;
+    const res = await fetch(`${BASE_URL}/goals/${name}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("ok");
+  } else if (sub === "list") {
+    const url = new URL(`${BASE_URL}/goals`);
+    if (args.done) url.searchParams.set("done", "1");
+    if (args.all) url.searchParams.set("all", "1");
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const goals = await res.json() as Array<{
+      name: string;
+      weight: number;
+      done: boolean;
+      body: string;
+    }>;
+    if (goals.length === 0) {
+      console.log("no goals");
+      return;
+    }
+    for (const g of goals) {
+      const status = g.done ? " [done]" : "";
+      console.log(`${g.name}  weight=${g.weight}${status}`);
+    }
+  } else if (sub === "delete") {
+    const name = rest[2];
+    if (!name) {
+      console.error("usage: zts admin goal delete <name>");
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/goals/${name}`, {
+      method: "DELETE",
+    });
+    if (res.status === 204) {
+      console.log("deleted");
+    } else {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+  } else {
+    console.error("usage: zts admin goal <add|set|list|delete> ...");
+    Deno.exit(1);
   }
 }
 
