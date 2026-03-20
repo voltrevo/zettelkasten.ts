@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS relationships (
   UNIQUE(from_hash, kind, to_hash)
 );
 
+CREATE TABLE IF NOT EXISTS properties (
+  hash  TEXT NOT NULL REFERENCES atoms(hash),
+  key   TEXT NOT NULL,
+  value TEXT,
+  PRIMARY KEY (hash, key)
+);
+
 CREATE TABLE IF NOT EXISTS log (
   id         INTEGER PRIMARY KEY,
   op         TEXT NOT NULL,
@@ -71,6 +78,13 @@ export interface LogEntry {
   actor?: string;
 }
 
+export class AmbiguousHashError extends Error {
+  constructor(prefix: string) {
+    super(`Ambiguous hash prefix: ${prefix}`);
+    this.name = "AmbiguousHashError";
+  }
+}
+
 export class Db {
   private db: Database;
 
@@ -96,6 +110,23 @@ export class Db {
       );
     }
     // Future: run migrations if row.version < SCHEMA_VERSION
+  }
+
+  // --- Hash resolution ---
+
+  /** Resolve a hash prefix to a full hash. Returns null if no match, throws if ambiguous. */
+  resolveHash(prefix: string): string | null {
+    if (prefix.length === 25) {
+      return this.atomExists(prefix) ? prefix : null;
+    }
+    const rows = this.db.prepare(
+      "SELECT hash FROM atoms WHERE hash LIKE ? LIMIT 2",
+    ).all<{ hash: string }>(prefix + "%");
+    if (rows.length === 0) return null;
+    if (rows.length > 1) {
+      throw new AmbiguousHashError(prefix);
+    }
+    return rows[0].hash;
   }
 
   // --- Atoms ---
@@ -138,6 +169,49 @@ export class Db {
       goal: row.goal,
       createdAt: row.created_at,
     };
+  }
+
+  listAtoms(opts: {
+    recent?: number;
+    goal?: string;
+    broken?: boolean;
+    prop?: string;
+  }): Omit<Atom, "source">[] {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+    let join = "";
+    if (opts.goal) {
+      conditions.push("a.goal = ?");
+      params.push(opts.goal);
+    }
+    if (opts.broken) {
+      conditions.push("a.description LIKE 'BROKEN:%'");
+    }
+    if (opts.prop) {
+      join = "JOIN properties p ON a.hash = p.hash AND p.key = ?";
+      params.unshift(opts.prop);
+    }
+    const where = conditions.length > 0
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+    const limit = opts.recent ? `LIMIT ?` : "";
+    if (opts.recent) params.push(opts.recent);
+    const rows = this.db.prepare(
+      `SELECT a.hash, a.gzip_size, a.description, a.goal, a.created_at FROM atoms a ${join} ${where} ORDER BY a.created_at DESC ${limit}`,
+    ).all<{
+      hash: string;
+      gzip_size: number;
+      description: string;
+      goal: string | null;
+      created_at: string;
+    }>(...params);
+    return rows.map((r) => ({
+      hash: r.hash,
+      gzipSize: r.gzip_size,
+      description: r.description,
+      goal: r.goal,
+      createdAt: r.created_at,
+    }));
   }
 
   getSource(hash: string): string | null {
@@ -285,6 +359,27 @@ export class Db {
       to: r.to_hash,
       createdAt: r.created_at,
     }));
+  }
+
+  // --- Properties ---
+
+  setProperty(hash: string, key: string, value?: string): void {
+    this.db.prepare(
+      "INSERT OR REPLACE INTO properties (hash, key, value) VALUES (?, ?, ?)",
+    ).run(hash, key, value ?? null);
+  }
+
+  unsetProperty(hash: string, key: string): boolean {
+    const changes = this.db.prepare(
+      "DELETE FROM properties WHERE hash = ? AND key = ?",
+    ).run(hash, key);
+    return changes > 0;
+  }
+
+  getProperties(hash: string): { key: string; value: string | null }[] {
+    return this.db.prepare(
+      "SELECT key, value FROM properties WHERE hash = ?",
+    ).all<{ key: string; value: string | null }>(hash);
   }
 
   // --- Log ---

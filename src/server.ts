@@ -2,7 +2,7 @@ import { brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bundleZip, extractDependencies } from "./bundle.ts";
-import { Db } from "./db.ts";
+import { AmbiguousHashError, Db } from "./db.ts";
 import type { Relationship } from "./db.ts";
 import {
   checkEmbeddingService,
@@ -137,6 +137,20 @@ function parseHashFromPath(path: string): string | null {
   return match[1] + match[2] + match[3];
 }
 
+/** Resolve a hash prefix. Returns full hash or an error Response. */
+function resolveHash(prefix: string): string | Response {
+  try {
+    const hash = db.resolveHash(prefix);
+    if (!hash) return new Response("Not found", { status: 404 });
+    return hash;
+  } catch (e) {
+    if (e instanceof AmbiguousHashError) {
+      return new Response(e.message, { status: 400 });
+    }
+    throw e;
+  }
+}
+
 async function handler(req: Request): Promise<Response> {
   const start = performance.now();
   const res = await route(req);
@@ -176,6 +190,7 @@ async function route(req: Request): Promise<Response> {
         { status: 400 },
       );
     }
+    const goal = req.headers.get("x-goal") || undefined;
     const content = await req.text();
     if (!content) {
       return new Response("Empty content", { status: 400 });
@@ -222,7 +237,7 @@ async function route(req: Request): Promise<Response> {
       // Store atom first (tests need it served for the idempotent case,
       // but we already checked it doesn't exist above)
       const gz = await gzipSize(minify(content));
-      db.insertAtom(hash, content, gz, description ?? "");
+      db.insertAtom(hash, content, gz, description ?? "", goal);
 
       // Auto-register test relationships
       for (const th of testHashes) {
@@ -257,7 +272,7 @@ async function route(req: Request): Promise<Response> {
 
     // No test gate — just store
     const gz = await gzipSize(minify(content));
-    db.insertAtom(hash, content, gz, description ?? "");
+    db.insertAtom(hash, content, gz, description ?? "", goal);
 
     // Auto-register import relationships
     for (const dep of extractDependencies(content)) {
@@ -287,9 +302,11 @@ async function route(req: Request): Promise<Response> {
 
   // GET /bundle/<hash> — zip of atom and all transitive dependencies
   if (req.method === "GET") {
-    const bundleMatch = path.match(/^\/bundle\/([a-z0-9]{25})$/);
+    const bundleMatch = path.match(/^\/bundle\/([a-z0-9]+)$/);
     if (bundleMatch) {
-      const hash = bundleMatch[1];
+      const resolved = resolveHash(bundleMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const hash = resolved;
       let zip: Uint8Array;
       try {
         zip = await bundleZip(
@@ -335,12 +352,11 @@ async function route(req: Request): Promise<Response> {
 
   // POST /a/<hash>/description — update description for an atom
   if (req.method === "POST") {
-    const descMatch = path.match(/^\/a\/([a-z0-9]{25})\/description$/);
+    const descMatch = path.match(/^\/a\/([a-z0-9]+)\/description$/);
     if (descMatch) {
-      const hash = descMatch[1];
-      if (!db.atomExists(hash)) {
-        return new Response("Atom not found", { status: 404 });
-      }
+      const resolved = resolveHash(descMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const hash = resolved;
       const description = (await req.text()).trim();
       if (!description) {
         return new Response("Empty description", { status: 400 });
@@ -370,9 +386,11 @@ async function route(req: Request): Promise<Response> {
 
   // GET /a/<hash>/description — retrieve stored description
   if (req.method === "GET") {
-    const descMatch = path.match(/^\/a\/([a-z0-9]{25})\/description$/);
+    const descMatch = path.match(/^\/a\/([a-z0-9]+)\/description$/);
     if (descMatch) {
-      const desc = db.getDescription(descMatch[1]);
+      const resolved = resolveHash(descMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const desc = db.getDescription(resolved);
       if (!desc) return new Response("Not found", { status: 404 });
       return new Response(desc, { headers: { "content-type": "text/plain" } });
     }
@@ -406,6 +424,129 @@ async function route(req: Request): Promise<Response> {
     return new Response(JSON.stringify(body), {
       headers: { "content-type": "application/json" },
     });
+  }
+
+  // GET /list?recent=N&goal=G&broken=1&prop=K — list atoms
+  if (req.method === "GET" && path === "/list") {
+    const recent = url.searchParams.get("recent");
+    const goal = url.searchParams.get("goal") ?? undefined;
+    const broken = url.searchParams.get("broken") === "1";
+    const prop = url.searchParams.get("prop") ?? undefined;
+    const atoms = db.listAtoms({
+      recent: recent ? parseInt(recent, 10) : undefined,
+      goal,
+      broken,
+      prop,
+    });
+    return new Response(JSON.stringify(atoms), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // GET /info/<hash-or-prefix> — full atom info in one call
+  if (req.method === "GET") {
+    const infoMatch = path.match(/^\/info\/([a-z0-9]+)$/);
+    if (infoMatch) {
+      const resolved = resolveHash(infoMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const atom = db.getAtom(resolved);
+      if (!atom) return new Response("Not found", { status: 404 });
+      const imports = db.queryRelationships({
+        from: resolved,
+        kind: "imports",
+      });
+      const importedBy = db.queryRelationships({
+        to: resolved,
+        kind: "imports",
+      });
+      const tests = db.queryRelationships({ from: resolved, kind: "tests" });
+      const testedBy = db.queryRelationships({ to: resolved, kind: "tests" });
+      const properties = db.getProperties(resolved);
+      return new Response(
+        JSON.stringify({
+          hash: atom.hash,
+          url: hashToUrlPath(atom.hash),
+          source: atom.source,
+          description: atom.description,
+          gzipSize: atom.gzipSize,
+          goal: atom.goal,
+          createdAt: atom.createdAt,
+          imports: imports.map((r) => r.to),
+          importedBy: importedBy.map((r) => r.from),
+          tests: tests.map((r) => r.to),
+          testedBy: testedBy.map((r) => r.from),
+          properties: properties,
+        }),
+        {
+          headers: { "content-type": "application/json" },
+        },
+      );
+    }
+  }
+
+  // GET /properties?hash=H&key=K — query properties
+  if (req.method === "GET" && path === "/properties") {
+    const hashParam = url.searchParams.get("hash");
+    if (!hashParam) {
+      return new Response("Missing ?hash=", { status: 400 });
+    }
+    const resolved = resolveHash(hashParam);
+    if (resolved instanceof Response) return resolved;
+    const key = url.searchParams.get("key") ?? undefined;
+    const props = db.getProperties(resolved);
+    const filtered = key ? props.filter((p) => p.key === key) : props;
+    return new Response(JSON.stringify(filtered), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // POST /properties — set a property { hash, key, value? }
+  if (req.method === "POST" && path === "/properties") {
+    let body: { hash?: string; key?: string; value?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    const { key, value } = body;
+    if (!body.hash || !key) {
+      return new Response("Missing hash or key", { status: 400 });
+    }
+    const resolved = resolveHash(body.hash);
+    if (resolved instanceof Response) return resolved;
+    db.setProperty(resolved, key, value);
+    db.insertLog({
+      op: "prop.set",
+      subject: resolved,
+      detail: JSON.stringify({ key, value: value ?? null }),
+    });
+    return new Response("ok\n", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    });
+  }
+
+  // DELETE /properties — remove a property { hash, key }
+  if (req.method === "DELETE" && path === "/properties") {
+    let body: { hash?: string; key?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    if (!body.hash || !body.key) {
+      return new Response("Missing hash or key", { status: 400 });
+    }
+    const resolved = resolveHash(body.hash);
+    if (resolved instanceof Response) return resolved;
+    const removed = db.unsetProperty(resolved, body.key);
+    if (!removed) return new Response("Not found", { status: 404 });
+    db.insertLog({
+      op: "prop.unset",
+      subject: resolved,
+      detail: JSON.stringify({ key: body.key }),
+    });
+    return new Response("ok\n", { headers: { "content-type": "text/plain" } });
   }
 
   // POST /relationships — add a relationship between two atoms
@@ -483,12 +624,11 @@ async function route(req: Request): Promise<Response> {
 
   // DELETE /a/<hash> — delete an orphan atom (no relationships)
   if (req.method === "DELETE") {
-    const delMatch = path.match(/^\/a\/([a-z0-9]{25})$/);
+    const delMatch = path.match(/^\/a\/([a-z0-9]+)$/);
     if (delMatch) {
-      const hash = delMatch[1];
-      if (!db.atomExists(hash)) {
-        return new Response("Not found", { status: 404 });
-      }
+      const resolved = resolveHash(delMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const hash = resolved;
       const outgoing = db.queryRelationships({ from: hash });
       if (outgoing.length > 0) {
         return new Response(
@@ -572,6 +712,12 @@ export async function serve(): Promise<void> {
     "  GET  /bundle/<hash>              — download zip bundle of atom + dependencies",
   );
   console.log(
+    "  GET  /list?recent=N&goal=G       — list atoms",
+  );
+  console.log(
+    "  GET  /info/<hash>                — full atom info (source, rels, tests)",
+  );
+  console.log(
     "  POST /a/<hash>/description       — update description for an atom",
   );
   console.log(
@@ -579,5 +725,8 @@ export async function serve(): Promise<void> {
   );
   console.log(
     "  GET  /search?q=<text>[&k=10]     — semantic nearest-neighbor search",
+  );
+  console.log(
+    "  Hash prefixes accepted everywhere (e.g. /info/3ax9 instead of full 25-char hash)",
   );
 }

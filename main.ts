@@ -1,5 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { parseZip } from "./src/bundle.ts";
+import { minify } from "./src/minify.ts";
+import { MAX_GZIP_BYTES } from "./src/validate.ts";
 import { DATA_DIR, PORT, serve } from "./src/server.ts";
 
 const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
@@ -13,14 +15,29 @@ const LOGROTATE_CONF = `${DATA_DIR}/logrotate.conf`;
 const LOGROTATE_STATE = `${DATA_DIR}/logrotate.status`;
 
 const args = parseArgs(Deno.args, {
-  string: ["d", "m", "n", "o", "k", "t"],
-  boolean: ["f", "no-description"],
+  string: [
+    "d",
+    "m",
+    "n",
+    "o",
+    "k",
+    "t",
+    "g",
+    "recent",
+    "goal",
+    "prop",
+    "from",
+    "to",
+    "kind",
+  ],
+  boolean: ["f", "no-description", "broken"],
   alias: {
     d: "description",
     f: "follow",
     n: "lines",
     o: "output",
     t: "tests",
+    g: "goal",
   },
 });
 
@@ -81,6 +98,38 @@ switch (command) {
     await cmdDelete(rest);
     break;
 
+  case "list":
+    await cmdList();
+    break;
+
+  case "info":
+    await cmdInfo(rest);
+    break;
+
+  case "size":
+    await cmdSize(rest);
+    break;
+
+  case "rels":
+    await cmdRels();
+    break;
+
+  case "dependents":
+    await cmdDependents(rest);
+    break;
+
+  case "relate":
+    await cmdRelate(rest);
+    break;
+
+  case "unrelate":
+    await cmdUnrelate(rest);
+    break;
+
+  case "prop":
+    await cmdProp(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -115,6 +164,36 @@ switch (command) {
     );
     console.error(
       "  delete <hash>                delete an orphan atom (no relationships)",
+    );
+    console.error(
+      "  list [--recent N] [--goal G] [--broken]  list atoms",
+    );
+    console.error(
+      "  info <hash>                  full atom info (source, rels, tests)",
+    );
+    console.error(
+      "  size <file>                  estimate gzip size (client-side)",
+    );
+    console.error(
+      "  rels [--from H] [--to H] [--kind K]  query relationships",
+    );
+    console.error(
+      "  dependents <hash>            atoms that import this one",
+    );
+    console.error(
+      "  relate <from> <to> [kind]    add a relationship (default: imports)",
+    );
+    console.error(
+      "  unrelate <from> <to> [kind]  remove a relationship (default: imports)",
+    );
+    console.error(
+      "  prop set <hash> <key> [val]  set a property on an atom",
+    );
+    console.error(
+      "  prop unset <hash> <key>      remove a property",
+    );
+    console.error(
+      "  prop list <hash>             list all properties on an atom",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -283,6 +362,9 @@ async function cmdPost(rest: string[]): Promise<void> {
   if (args.t) {
     headers["x-require-tests"] = args.t;
   }
+  if (args.g) {
+    headers["x-goal"] = args.g;
+  }
 
   const res = await fetch(`${BASE_URL}/a`, {
     method: "POST",
@@ -315,6 +397,281 @@ async function cmdDelete(rest: string[]): Promise<void> {
     console.error(`error: ${res.status} ${await res.text()}`);
     Deno.exit(1);
   }
+}
+
+async function cmdList(): Promise<void> {
+  const url = new URL(`${BASE_URL}/list`);
+  if (args.recent) url.searchParams.set("recent", args.recent);
+  if (args.goal) url.searchParams.set("goal", args.goal);
+  if (args.broken) url.searchParams.set("broken", "1");
+  if (args.prop) url.searchParams.set("prop", args.prop);
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const atoms = await res.json() as Array<{
+    hash: string;
+    description: string;
+    goal: string | null;
+    gzipSize: number;
+    createdAt: string;
+  }>;
+  if (atoms.length === 0) {
+    console.log("no atoms");
+    return;
+  }
+  for (const a of atoms) {
+    const goal = a.goal ? ` [${a.goal}]` : "";
+    console.log(`${a.hash}  ${a.description}${goal}`);
+  }
+}
+
+async function cmdInfo(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts info <hash>");
+    Deno.exit(1);
+  }
+  const res = await fetch(`${BASE_URL}/info/${hash}`);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const info = await res.json() as {
+    hash: string;
+    url: string;
+    source: string;
+    description: string;
+    gzipSize: number;
+    goal: string | null;
+    createdAt: string;
+    imports: string[];
+    importedBy: string[];
+    tests: string[];
+    testedBy: string[];
+    properties: { key: string; value: string | null }[];
+  };
+  console.log(`hash:        ${info.hash}`);
+  console.log(`url:         ${info.url}`);
+  console.log(`description: ${info.description}`);
+  console.log(`size:        ${info.gzipSize} bytes (min+gz)`);
+  if (info.goal) console.log(`goal:        ${info.goal}`);
+  console.log(`created:     ${info.createdAt}`);
+  if (info.imports.length > 0) {
+    console.log(`imports:     ${info.imports.join(", ")}`);
+  }
+  if (info.importedBy.length > 0) {
+    console.log(`imported by: ${info.importedBy.join(", ")}`);
+  }
+  if (info.testedBy.length > 0) {
+    console.log(`tested by:   ${info.testedBy.join(", ")}`);
+  }
+  if (info.properties.length > 0) {
+    const propStr = info.properties.map((p) =>
+      p.value ? `${p.key}=${p.value}` : p.key
+    ).join(", ");
+    console.log(`properties:  ${propStr}`);
+  }
+  if (info.tests.length > 0) {
+    console.log(`tests:       ${info.tests.join(", ")}`);
+  }
+  console.log("---");
+  console.log(info.source);
+}
+
+async function cmdProp(rest: string[]): Promise<void> {
+  const sub = rest[0];
+  if (sub === "set") {
+    const hash = rest[1];
+    const key = rest[2];
+    const value = rest[3]; // may be undefined
+    if (!hash || !key) {
+      console.error("usage: zts prop set <hash> <key> [value]");
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/properties`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ hash, key, value }),
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("ok");
+  } else if (sub === "unset") {
+    const hash = rest[1];
+    const key = rest[2];
+    if (!hash || !key) {
+      console.error("usage: zts prop unset <hash> <key>");
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/properties`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ hash, key }),
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("removed");
+  } else if (sub === "list") {
+    const hash = rest[1];
+    if (!hash) {
+      console.error("usage: zts prop list <hash>");
+      Deno.exit(1);
+    }
+    const url = new URL(`${BASE_URL}/properties`);
+    url.searchParams.set("hash", hash);
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const props = await res.json() as Array<
+      { key: string; value: string | null }
+    >;
+    if (props.length === 0) {
+      console.log("no properties");
+      return;
+    }
+    for (const p of props) {
+      console.log(p.value ? `${p.key}=${p.value}` : p.key);
+    }
+  } else {
+    console.error("usage: zts prop <set|unset|list> ...");
+    Deno.exit(1);
+  }
+}
+
+async function cmdSize(rest: string[]): Promise<void> {
+  const file = rest[0];
+  if (!file) {
+    console.error("usage: zts size <file>");
+    Deno.exit(1);
+  }
+  const source = await Deno.readTextFile(file);
+  const minified = minify(source);
+  const stream = new CompressionStream("gzip");
+  const writer = stream.writable.getWriter();
+  writer.write(new TextEncoder().encode(minified));
+  writer.close();
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream.readable as AsyncIterable<Uint8Array>) {
+    chunks.push(chunk);
+  }
+  const size = chunks.reduce((n, c) => n + c.length, 0);
+  const status = size <= MAX_GZIP_BYTES ? "within" : "EXCEEDS";
+  console.log(
+    `${size} bytes (min+gz) — ${status} ${MAX_GZIP_BYTES} byte limit`,
+  );
+}
+
+async function cmdRels(): Promise<void> {
+  const from = args.from;
+  const to = args.to;
+  const kind = args.kind;
+  if (!from && !to && !kind) {
+    console.error(
+      "usage: zts rels [--from <hash>] [--to <hash>] [--kind <kind>]",
+    );
+    console.error("  at least one filter required");
+    Deno.exit(1);
+  }
+  const url = new URL(`${BASE_URL}/relationships`);
+  if (from) url.searchParams.set("from", from);
+  if (to) url.searchParams.set("to", to);
+  if (kind) url.searchParams.set("kind", kind);
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const rels = await res.json() as Array<{
+    from: string;
+    kind: string;
+    to: string;
+    createdAt: string;
+  }>;
+  if (rels.length === 0) {
+    console.log("no relationships found");
+    return;
+  }
+  for (const r of rels) {
+    console.log(`${r.from}  --${r.kind}-->  ${r.to}`);
+  }
+}
+
+async function cmdDependents(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts dependents <hash>");
+    Deno.exit(1);
+  }
+  const url = new URL(`${BASE_URL}/relationships`);
+  url.searchParams.set("to", hash);
+  url.searchParams.set("kind", "imports");
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const rels = await res.json() as Array<{
+    from: string;
+    kind: string;
+    to: string;
+  }>;
+  if (rels.length === 0) {
+    console.log("no dependents");
+    return;
+  }
+  for (const r of rels) {
+    console.log(r.from);
+  }
+}
+
+async function cmdRelate(rest: string[]): Promise<void> {
+  const from = rest[0];
+  const to = rest[1];
+  const kind = rest[2] ?? "imports";
+  if (!from || !to) {
+    console.error("usage: zts relate <from> <to> [kind]");
+    console.error("  kind defaults to 'imports'");
+    Deno.exit(1);
+  }
+  const res = await fetch(`${BASE_URL}/relationships`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ from, to, kind }),
+  });
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  console.log(res.status === 201 ? "created" : "already exists");
+}
+
+async function cmdUnrelate(rest: string[]): Promise<void> {
+  const from = rest[0];
+  const to = rest[1];
+  const kind = rest[2] ?? "imports";
+  if (!from || !to) {
+    console.error("usage: zts unrelate <from> <to> [kind]");
+    console.error("  kind defaults to 'imports'");
+    Deno.exit(1);
+  }
+  const res = await fetch(`${BASE_URL}/relationships`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ from, to, kind }),
+  });
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  console.log("removed");
 }
 
 async function spawnRun(

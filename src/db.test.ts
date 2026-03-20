@@ -197,6 +197,126 @@ Deno.test("Db: insertLog", () => {
   d.close();
 });
 
+// --- Hash resolution ---
+
+Deno.test("Db: resolveHash with full hash", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  assertEquals(d.resolveHash(HASH_A), HASH_A);
+  assertEquals(d.resolveHash(HASH_B), null);
+  d.close();
+});
+
+Deno.test("Db: resolveHash with prefix", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  // HASH_A = "aaaaabbbbbcccccdddddeeeee", prefix "aaaaa" should match
+  assertEquals(d.resolveHash("aaaaa"), HASH_A);
+  d.close();
+});
+
+Deno.test("Db: resolveHash throws on ambiguous prefix", () => {
+  const d = makeDb();
+  // HASH_A and HASH_C both start with different chars, but let's create two
+  // that share a prefix
+  d.insertAtom("abcde" + "f".repeat(20), "src", 10, "one");
+  d.insertAtom("abcde" + "g".repeat(20), "src", 10, "two");
+  let threw = false;
+  try {
+    d.resolveHash("abcde");
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+  d.close();
+});
+
+// --- List atoms ---
+
+Deno.test("Db: listAtoms returns all atoms", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "first");
+  d.insertAtom(HASH_B, "src", 20, "second");
+  const atoms = d.listAtoms({});
+  assertEquals(atoms.length, 2);
+  d.close();
+});
+
+Deno.test("Db: listAtoms with recent limit", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "first");
+  d.insertAtom(HASH_B, "src", 20, "second");
+  const atoms = d.listAtoms({ recent: 1 });
+  assertEquals(atoms.length, 1);
+  d.close();
+});
+
+Deno.test("Db: listAtoms filters by goal", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "first", "my-goal");
+  d.insertAtom(HASH_B, "src", 20, "second");
+  const atoms = d.listAtoms({ goal: "my-goal" });
+  assertEquals(atoms.length, 1);
+  assertEquals(atoms[0].hash, HASH_A);
+  d.close();
+});
+
+Deno.test("Db: listAtoms filters broken", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "BROKEN: bad atom");
+  d.insertAtom(HASH_B, "src", 20, "good atom");
+  const atoms = d.listAtoms({ broken: true });
+  assertEquals(atoms.length, 1);
+  assertEquals(atoms[0].hash, HASH_A);
+  d.close();
+});
+
+// --- Properties ---
+
+Deno.test("Db: setProperty and getProperties", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  d.setProperty(HASH_A, "starred");
+  d.setProperty(HASH_A, "color", "red");
+  const props = d.getProperties(HASH_A);
+  assertEquals(props.length, 2);
+  assertEquals(props.find((p) => p.key === "starred")?.value, null);
+  assertEquals(props.find((p) => p.key === "color")?.value, "red");
+  d.close();
+});
+
+Deno.test("Db: setProperty is idempotent (upsert)", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  d.setProperty(HASH_A, "color", "red");
+  d.setProperty(HASH_A, "color", "blue");
+  const props = d.getProperties(HASH_A);
+  assertEquals(props.length, 1);
+  assertEquals(props[0].value, "blue");
+  d.close();
+});
+
+Deno.test("Db: unsetProperty", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  d.setProperty(HASH_A, "starred");
+  assertEquals(d.unsetProperty(HASH_A, "starred"), true);
+  assertEquals(d.getProperties(HASH_A).length, 0);
+  assertEquals(d.unsetProperty(HASH_A, "starred"), false);
+  d.close();
+});
+
+Deno.test("Db: listAtoms filters by prop", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "starred atom");
+  d.insertAtom(HASH_B, "src", 20, "normal atom");
+  d.setProperty(HASH_A, "starred");
+  const atoms = d.listAtoms({ prop: "starred" });
+  assertEquals(atoms.length, 1);
+  assertEquals(atoms[0].hash, HASH_A);
+  d.close();
+});
+
 // --- Schema version ---
 
 Deno.test("Db: schema version is set on creation", () => {

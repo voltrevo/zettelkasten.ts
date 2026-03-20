@@ -157,7 +157,34 @@ warning: d3e4f has known correctness defects:
 
 ---
 
-### 7. Supersedes + tops
+### 7. Test run history + audit log CLI
+
+CLI coverage for the `test_runs` and `log` tables so agents never need
+curl. Rename the existing `zts log` (server process file tail) to
+`zts server-log` to free the name.
+
+- `zts runs <hash> [--recent N]` — query test execution history for an
+  atom (pass/fail, duration, run_by)
+- `zts log [--recent N] [--op X] [--subject X]` — query the structured
+  audit trail (atom.create, rel.create, goal.done, etc.)
+
+Server endpoints: `GET /test-runs?target=<hash>&recent=N`,
+`GET /log?recent=N&op=X&subject=X`.
+
+```
+$ zts runs 3ax9b --recent 5
+a1b2c  pass  12ms  checker  2026-03-20T14:32:00Z
+f9e8d  pass   8ms  checker  2026-03-20T14:32:00Z
+
+$ zts log --recent 3
+atom.create  3ax9b  {"gzip_size":412}  2026-03-20T14:30:00Z
+rel.create   a1b2c:3ax9b  {"kind":"tests"}  2026-03-20T14:32:00Z
+atom.describe  3ax9b  2026-03-20T14:33:00Z
+```
+
+---
+
+### 8. Supersedes + tops
 
 Add `kind=supersedes` relationship. Implement `zts tops` for BFS navigation to
 current best alternatives. Auto-register supersedes from `zts fail` evidence.
@@ -176,7 +203,7 @@ Depth 1:
 
 ---
 
-### 8. FTS5 source code search
+### 9. FTS5 source code search
 
 Create `atoms_fts` virtual table on atom source. Complement existing embedding
 search on descriptions with full-text search on code.
@@ -194,7 +221,7 @@ d4f7c...  HMAC-SHA256 per RFC 2104
 
 ---
 
-### 9. Goals system
+### 10. Goals system
 
 Create `goals` and `goal_comments` tables. Add `goal` column to `atoms`.
 Implement agent commands
@@ -215,7 +242,7 @@ $ zts post -d "WebSocket frame parser" -g websocket-framing -t <test> /tmp/ws.ts
 
 ---
 
-### 10. zts status
+### 11. zts status
 
 Corpus orientation in one command. Total atoms, recent activity, defects,
 per-goal contribution stats.
@@ -238,7 +265,7 @@ Defects (violates_intent):
 
 ---
 
-### 11. Auth
+### 12. Auth
 
 Bearer tokens, three tiers: unauthed (reads), dev (writes), admin (goal
 management). Server enforces. CLI reads tokens from env and includes
@@ -254,7 +281,7 @@ $ curl http://localhost:8000/a/3a/x9/b7f2de1k4m8np3qrs.ts
 
 ---
 
-### 12. Agent loop runner + workspace
+### 13. Agent loop runner + workspace
 
 `zts script worker` emits a shell script that runs the autonomous agent loop.
 `zts script context` and `zts script iteration` emit the prompt fragments.
@@ -275,7 +302,7 @@ $ zts script worker --channel bricklane | bash
 
 ---
 
-### 13. Docker deployment
+### 14. Docker deployment
 
 Four containers: gateway (Squid proxy), zts-server (corpus + API + Ollama),
 checker (test execution), agent (Claude Code + zts CLI). One compose file.
@@ -290,7 +317,7 @@ $ docker compose logs -f agent
 
 ---
 
-### 14. Web UI
+### 15. Web UI
 
 Admin web interface served by zts-server at `/ui/`. Dashboard (live
 `zts status`), corpus browser with search and filters, atom detail with
