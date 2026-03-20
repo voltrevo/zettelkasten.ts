@@ -1,0 +1,48 @@
+services:
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    environment:
+      - FRP_SERVER_ADDR=${FRP_SERVER_ADDR}
+      - FRP_AUTH_TOKEN=${FRP_AUTH_TOKEN}
+      - FRP_REMOTE_PORT=${FRP_REMOTE_PORT}
+      - FRP_SERVER_PORT=${FRP_SERVER_PORT:-7000}
+      - SANDBOX_HOST=sandbox
+    volumes:
+      - ./gateway/allowed_domains.txt:/etc/squid/allowed_domains.txt:ro
+    networks:
+      sandbox-net:
+        ipv4_address: 172.28.0.2
+      gateway-egress:
+
+  sandbox:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    environment:
+      - SSH_AUTHORIZED_KEYS=${SSH_AUTHORIZED_KEYS}
+      - GATEWAY_IP=${GATEWAY_IP:-172.28.0.2}
+      - GATEWAY_PORT=${GATEWAY_PORT:-3128}
+    volumes:
+      - workspace:/home/claude/workspace
+      - claude-config:/home/claude/.claude
+      - ssh-host-keys:/etc/ssh
+    networks:
+      sandbox-net:
+
+networks:
+  sandbox-net:
+    internal: true
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+          gateway: 172.28.0.1
+  gateway-egress:
+    driver: bridge
+
+volumes:
+  workspace:
+  claude-config:
+  ssh-host-keys:

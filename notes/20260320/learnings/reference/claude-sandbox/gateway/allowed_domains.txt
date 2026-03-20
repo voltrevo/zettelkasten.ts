@@ -1,0 +1,9 @@
+# Claude API + Auth
+.anthropic.com
+.claude.ai
+.claude.com
+
+# Ubuntu/Debian apt repos
+.ubuntu.com
+.debian.org
+.launchpad.net
