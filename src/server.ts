@@ -730,6 +730,21 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
+  // GET /log?recent=N&op=X&subject=X — query audit log
+  if (req.method === "GET" && path === "/log") {
+    const recentParam = url.searchParams.get("recent");
+    const op = url.searchParams.get("op") ?? undefined;
+    const subject = url.searchParams.get("subject") ?? undefined;
+    const entries = db.queryLog({
+      recent: recentParam ? parseInt(recentParam, 10) : undefined,
+      op,
+      subject,
+    });
+    return new Response(JSON.stringify(entries), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   // POST /relationships — add a relationship between two atoms
   if (req.method === "POST" && path === "/relationships") {
     let body: { kind?: string; from?: string; to?: string };

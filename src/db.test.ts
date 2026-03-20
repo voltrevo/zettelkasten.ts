@@ -399,6 +399,58 @@ Deno.test("Db: queryTestRuns with recent limit", () => {
   d.close();
 });
 
+// --- Log queries ---
+
+Deno.test("Db: queryLog returns entries", () => {
+  const d = makeDb();
+  d.insertLog({
+    op: "atom.create",
+    subject: HASH_A,
+    detail: '{"gzip_size":42}',
+  });
+  d.insertLog({
+    op: "rel.create",
+    subject: `${HASH_A}:${HASH_B}`,
+    detail: '{"kind":"tests"}',
+  });
+  d.insertLog({ op: "atom.delete", subject: HASH_B });
+  const all = d.queryLog({});
+  assertEquals(all.length, 3);
+  // most recent first
+  assertEquals(all[0].op, "atom.delete");
+  d.close();
+});
+
+Deno.test("Db: queryLog filters by op", () => {
+  const d = makeDb();
+  d.insertLog({ op: "atom.create", subject: HASH_A });
+  d.insertLog({ op: "rel.create", subject: HASH_B });
+  const filtered = d.queryLog({ op: "atom.create" });
+  assertEquals(filtered.length, 1);
+  assertEquals(filtered[0].subject, HASH_A);
+  d.close();
+});
+
+Deno.test("Db: queryLog filters by subject", () => {
+  const d = makeDb();
+  d.insertLog({ op: "atom.create", subject: HASH_A });
+  d.insertLog({ op: "atom.describe", subject: HASH_A });
+  d.insertLog({ op: "atom.create", subject: HASH_B });
+  const filtered = d.queryLog({ subject: HASH_A });
+  assertEquals(filtered.length, 2);
+  d.close();
+});
+
+Deno.test("Db: queryLog with recent limit", () => {
+  const d = makeDb();
+  d.insertLog({ op: "atom.create", subject: HASH_A });
+  d.insertLog({ op: "atom.create", subject: HASH_B });
+  d.insertLog({ op: "atom.create", subject: HASH_C });
+  const limited = d.queryLog({ recent: 2 });
+  assertEquals(limited.length, 2);
+  d.close();
+});
+
 // --- Schema version ---
 
 Deno.test("Db: schema version is set on creation", () => {

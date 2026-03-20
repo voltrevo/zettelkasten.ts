@@ -551,6 +551,52 @@ export class Db {
     );
   }
 
+  queryLog(opts: {
+    recent?: number;
+    op?: string;
+    subject?: string;
+  }): {
+    id: number;
+    op: string;
+    subject: string | null;
+    detail: string | null;
+    actor: string | null;
+    createdAt: string;
+  }[] {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+    if (opts.op) {
+      conditions.push("op = ?");
+      params.push(opts.op);
+    }
+    if (opts.subject) {
+      conditions.push("subject = ?");
+      params.push(opts.subject);
+    }
+    const where = conditions.length > 0
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+    const limit = opts.recent ? `LIMIT ?` : "";
+    if (opts.recent) params.push(opts.recent);
+    return this.db.prepare(
+      `SELECT id, op, subject, detail, actor, created_at FROM log ${where} ORDER BY id DESC ${limit}`,
+    ).all<{
+      id: number;
+      op: string;
+      subject: string | null;
+      detail: string | null;
+      actor: string | null;
+      created_at: string;
+    }>(...params).map((r) => ({
+      id: r.id,
+      op: r.op,
+      subject: r.subject,
+      detail: r.detail,
+      actor: r.actor,
+      createdAt: r.created_at,
+    }));
+  }
+
   // --- Lifecycle ---
 
   close(): void {

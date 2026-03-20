@@ -31,6 +31,8 @@ const args = parseArgs(Deno.args, {
     "kind",
     "expected",
     "commentary",
+    "op",
+    "subject",
   ],
   boolean: ["f", "no-description", "broken"],
   alias: {
@@ -64,8 +66,16 @@ switch (command) {
     await systemctl("restart", UNIT_NAME);
     break;
 
+  case "server-log":
+    await cmdServerLog();
+    break;
+
   case "log":
-    await cmdLog();
+    await cmdAuditLog();
+    break;
+
+  case "runs":
+    await cmdRuns(rest);
     break;
 
   case "get":
@@ -154,7 +164,13 @@ switch (command) {
       "  stop                         stop daemon and disable on boot",
     );
     console.error("  restart                      restart the daemon");
-    console.error("  log [-f] [-n <lines>]        show server log");
+    console.error("  server-log [-f] [-n <lines>] show server process log");
+    console.error(
+      "  log [--recent N] [--op X] [--subject X]  query audit log",
+    );
+    console.error(
+      "  runs <hash> [--recent N]     test run history for an atom",
+    );
     console.error(
       "  get <path|hash>              retrieve code by content address",
     );
@@ -326,7 +342,7 @@ async function daemonStop(): Promise<void> {
   console.log("Service stopped and disabled.");
 }
 
-async function cmdLog(): Promise<void> {
+async function cmdServerLog(): Promise<void> {
   const lines = args.n ?? "50";
   const follow = args.f;
   const tailArgs = follow
@@ -339,6 +355,65 @@ async function cmdLog(): Promise<void> {
   });
   const { code } = await proc.output();
   if (code !== 0) Deno.exit(code);
+}
+
+async function cmdAuditLog(): Promise<void> {
+  const url = new URL(`${BASE_URL}/log`);
+  if (args.recent) url.searchParams.set("recent", args.recent);
+  if (args.op) url.searchParams.set("op", args.op);
+  if (args.subject) url.searchParams.set("subject", args.subject);
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const entries = await res.json() as Array<{
+    id: number;
+    op: string;
+    subject: string | null;
+    detail: string | null;
+    actor: string | null;
+    createdAt: string;
+  }>;
+  if (entries.length === 0) {
+    console.log("no log entries");
+    return;
+  }
+  for (const e of entries) {
+    const detail = e.detail ? `  ${e.detail}` : "";
+    console.log(`${e.op}  ${e.subject ?? ""}${detail}  ${e.createdAt}`);
+  }
+}
+
+async function cmdRuns(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts runs <hash> [--recent N]");
+    Deno.exit(1);
+  }
+  const url = new URL(`${BASE_URL}/test-runs`);
+  url.searchParams.set("target", hash);
+  if (args.recent) url.searchParams.set("recent", args.recent);
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const runs = await res.json() as Array<{
+    testAtom: string;
+    result: string;
+    durationMs: number | null;
+    runBy: string;
+    ranAt: string;
+  }>;
+  if (runs.length === 0) {
+    console.log("no test runs");
+    return;
+  }
+  for (const r of runs) {
+    const ms = r.durationMs !== null ? `${r.durationMs}ms` : "?ms";
+    console.log(`${r.testAtom}  ${r.result}  ${ms}  ${r.runBy}  ${r.ranAt}`);
+  }
 }
 
 async function cmdGet(rest: string[]): Promise<void> {
