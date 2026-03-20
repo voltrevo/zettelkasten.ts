@@ -957,6 +957,84 @@ export class Db {
     return row !== undefined;
   }
 
+  // --- Status ---
+
+  getStatus(since: string): {
+    totalAtoms: number;
+    defects: number;
+    superseded: number;
+    recentAtoms: number;
+    recentRelationships: number;
+    recentGoalsDone: number;
+    goalStats: {
+      name: string;
+      total: number;
+      recent: number;
+      commentCount: number;
+    }[];
+    activeGoals: { name: string; weight: number }[];
+  } {
+    const totalAtoms = this.db.prepare("SELECT count(*) as c FROM atoms")
+      .get<{ c: number }>()!.c;
+
+    const defects = this.db.prepare(
+      "SELECT count(DISTINCT target_atom) as c FROM test_evaluation WHERE expected_outcome = 'violates_intent'",
+    ).get<{ c: number }>()!.c;
+
+    const superseded = this.db.prepare(
+      "SELECT count(DISTINCT to_hash) as c FROM relationships WHERE kind = 'supersedes'",
+    ).get<{ c: number }>()!.c;
+
+    const recentAtoms = this.db.prepare(
+      "SELECT count(*) as c FROM atoms WHERE created_at >= ?",
+    ).get<{ c: number }>(since)!.c;
+
+    const recentRelationships = this.db.prepare(
+      "SELECT count(*) as c FROM relationships WHERE created_at >= ?",
+    ).get<{ c: number }>(since)!.c;
+
+    const recentGoalsDone = this.db.prepare(
+      "SELECT count(*) as c FROM log WHERE op = 'goal.done' AND created_at >= ?",
+    ).get<{ c: number }>(since)!.c;
+
+    const goalStats = this.db.prepare(
+      `SELECT g.name,
+              count(a.hash) as total,
+              count(CASE WHEN a.created_at >= ? THEN 1 END) as recent,
+              (SELECT count(*) FROM goal_comments gc WHERE gc.goal_id = g.id) as comment_count
+       FROM goals g
+       LEFT JOIN atoms a ON a.goal = g.name
+       WHERE g.done = 0
+       GROUP BY g.id
+       ORDER BY recent DESC, total DESC`,
+    ).all<{
+      name: string;
+      total: number;
+      recent: number;
+      comment_count: number;
+    }>(since).map((r) => ({
+      name: r.name,
+      total: r.total,
+      recent: r.recent,
+      commentCount: r.comment_count,
+    }));
+
+    const activeGoals = this.db.prepare(
+      "SELECT name, weight FROM goals WHERE done = 0 ORDER BY weight DESC",
+    ).all<{ name: string; weight: number }>();
+
+    return {
+      totalAtoms,
+      defects,
+      superseded,
+      recentAtoms,
+      recentRelationships,
+      recentGoalsDone,
+      goalStats,
+      activeGoals,
+    };
+  }
+
   // --- Lifecycle ---
 
   close(): void {

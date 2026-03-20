@@ -935,6 +935,20 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
+  // GET /status?since=<date> — corpus health summary
+  if (req.method === "GET" && path === "/status") {
+    const sinceParam = url.searchParams.get("since");
+    const since = sinceParam ??
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(
+        0,
+        19,
+      ).replace("T", " ");
+    const status = db.getStatus(since);
+    return new Response(JSON.stringify({ ...status, since }), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   // --- Goals ---
 
   // GET /goals — list non-done goals

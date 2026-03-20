@@ -655,6 +655,40 @@ Deno.test("Db: goalExists", () => {
   d.close();
 });
 
+// --- Status ---
+
+Deno.test("Db: getStatus returns corpus summary", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "atom a");
+  d.insertAtom(HASH_B, "src", 20, "atom b");
+  d.createGoal("g1", 0.8);
+  d.insertAtom(HASH_C, "src", 30, "atom c", "g1");
+  d.addGoalComment("g1", "progress note");
+  d.insertRelationship(HASH_A, "supersedes", HASH_B);
+  d.upsertTestEvaluation(HASH_A, HASH_B, "violates_intent");
+
+  const s = d.getStatus("2000-01-01");
+  assertEquals(s.totalAtoms, 3);
+  assertEquals(s.defects, 1);
+  assertEquals(s.superseded, 1);
+  assertEquals(s.recentAtoms, 3);
+  assertEquals(s.goalStats.length, 1);
+  assertEquals(s.goalStats[0].name, "g1");
+  assertEquals(s.goalStats[0].total, 1);
+  assertEquals(s.goalStats[0].commentCount, 1);
+  assertEquals(s.activeGoals.length, 1);
+  d.close();
+});
+
+Deno.test("Db: getStatus with future since returns zero recent", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "atom a");
+  const s = d.getStatus("2099-01-01");
+  assertEquals(s.totalAtoms, 1);
+  assertEquals(s.recentAtoms, 0);
+  d.close();
+});
+
 // --- Schema version ---
 
 Deno.test("Db: schema version is set on creation", () => {

@@ -37,6 +37,7 @@ const args = parseArgs(Deno.args, {
     "code",
     "weight",
     "body",
+    "since",
   ],
   boolean: ["f", "no-description", "broken", "all", "done"],
   alias: {
@@ -170,6 +171,10 @@ switch (command) {
     await cmdAdmin(rest);
     break;
 
+  case "status":
+    await cmdStatus();
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -264,6 +269,9 @@ switch (command) {
     );
     console.error(
       "  admin goal add|set|list|delete   admin goal management",
+    );
+    console.error(
+      "  status [--since YYYY-MM-DD]  corpus health summary",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -1070,6 +1078,47 @@ async function cmdAdmin(rest: string[]): Promise<void> {
   } else {
     console.error("usage: zts admin goal <add|set|list|delete> ...");
     Deno.exit(1);
+  }
+}
+
+async function cmdStatus(): Promise<void> {
+  const url = new URL(`${BASE_URL}/status`);
+  if (args.since) url.searchParams.set("since", args.since);
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const s = await res.json() as {
+    totalAtoms: number;
+    defects: number;
+    superseded: number;
+    recentAtoms: number;
+    recentRelationships: number;
+    recentGoalsDone: number;
+    since: string;
+    goalStats: {
+      name: string;
+      total: number;
+      recent: number;
+      commentCount: number;
+    }[];
+    activeGoals: { name: string; weight: number }[];
+  };
+  console.log(
+    `Corpus: ${s.totalAtoms} atoms (${s.defects} defects, ${s.superseded} superseded)`,
+  );
+  console.log(
+    `\nRecent (since ${s.since}):  +${s.recentAtoms} atoms  +${s.recentRelationships} relationships  +${s.recentGoalsDone} goals completed`,
+  );
+  if (s.goalStats.length > 0) {
+    console.log("\nGoals (active):");
+    for (const g of s.goalStats) {
+      const recentStr = g.recent > 0 ? ` (${g.recent} new)` : "";
+      console.log(
+        `  ${g.name}  ${g.total} atoms${recentStr}  ${g.commentCount} comments`,
+      );
+    }
   }
 }
 
