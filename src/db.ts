@@ -59,6 +59,22 @@ CREATE TABLE IF NOT EXISTS test_runs (
   ran_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE VIRTUAL TABLE IF NOT EXISTS atoms_fts USING fts5(
+  hash UNINDEXED,
+  source,
+  content=atoms,
+  content_rowid=rowid
+);
+
+-- Triggers to keep FTS in sync
+CREATE TRIGGER IF NOT EXISTS atoms_fts_insert AFTER INSERT ON atoms BEGIN
+  INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
+END;
+
+CREATE TRIGGER IF NOT EXISTS atoms_fts_delete AFTER DELETE ON atoms BEGIN
+  INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
+END;
+
 CREATE TABLE IF NOT EXISTS log (
   id         INTEGER PRIMARY KEY,
   op         TEXT NOT NULL,
@@ -680,6 +696,23 @@ export class Db {
       actor: r.actor,
       createdAt: r.created_at,
     }));
+  }
+
+  // --- FTS source search ---
+
+  searchSource(
+    query: string,
+    limit: number = 20,
+  ): { hash: string; snippet: string }[] {
+    return this.db.prepare(
+      `SELECT hash, snippet(atoms_fts, 1, '>>>', '<<<', '...', 40) as snippet
+       FROM atoms_fts WHERE source MATCH ? ORDER BY rank LIMIT ?`,
+    ).all<{ hash: string; snippet: string }>(query, limit);
+  }
+
+  /** Rebuild the FTS index from all atoms. Call after migration. */
+  rebuildFts(): void {
+    this.db.exec("INSERT INTO atoms_fts(atoms_fts) VALUES ('rebuild')");
   }
 
   // --- Lifecycle ---

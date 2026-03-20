@@ -423,10 +423,33 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // GET /search?q=<text>[&k=10] — semantic nearest-neighbor search
+  // GET /search?q=<text>[&k=10] — semantic search
+  // GET /search?code=<text>[&k=20] — FTS5 source code search
   if (req.method === "GET" && path === "/search") {
+    const code = url.searchParams.get("code")?.trim();
+    if (code) {
+      const k = Math.min(
+        parseInt(url.searchParams.get("k") ?? "20", 10),
+        100,
+      );
+      try {
+        const hits = db.searchSource(code, k);
+        const body = hits.map(({ hash, snippet }) => ({
+          hash,
+          url: hashToUrlPath(hash),
+          snippet,
+          description: db.getDescription(hash) ?? "",
+        }));
+        return new Response(JSON.stringify(body), {
+          headers: { "content-type": "application/json" },
+        });
+      } catch {
+        return new Response("Invalid FTS5 query syntax", { status: 400 });
+      }
+    }
+
     const q = url.searchParams.get("q")?.trim();
-    if (!q) return new Response("Missing ?q=", { status: 400 });
+    if (!q) return new Response("Missing ?q= or ?code=", { status: 400 });
     const k = Math.min(
       parseInt(url.searchParams.get("k") ?? "10", 10),
       100,

@@ -515,6 +515,39 @@ Deno.test("Db: queryLog with recent limit", () => {
   d.close();
 });
 
+// --- FTS source search ---
+
+Deno.test("Db: searchSource finds atoms by code content", () => {
+  const d = makeDb();
+  d.insertAtom(
+    HASH_A,
+    "export function gcd(a: number, b: number) {}",
+    50,
+    "gcd",
+  );
+  d.insertAtom(HASH_B, "export function isPrime(n: number) {}", 40, "prime");
+  const hits = d.searchSource("gcd", 10);
+  assertEquals(hits.length, 1);
+  assertEquals(hits[0].hash, HASH_A);
+  d.close();
+});
+
+Deno.test("Db: searchSource is case-insensitive", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "export function GCD(a: number) {}", 50, "gcd");
+  const hits = d.searchSource("gcd", 10);
+  assertEquals(hits.length, 1);
+  d.close();
+});
+
+Deno.test("Db: searchSource returns empty for no match", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "export const x = 1;", 30, "x");
+  const hits = d.searchSource("nonexistent", 10);
+  assertEquals(hits.length, 0);
+  d.close();
+});
+
 // --- Schema version ---
 
 Deno.test("Db: schema version is set on creation", () => {

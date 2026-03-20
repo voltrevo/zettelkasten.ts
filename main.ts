@@ -34,6 +34,7 @@ const args = parseArgs(Deno.args, {
     "op",
     "subject",
     "limit",
+    "code",
   ],
   boolean: ["f", "no-description", "broken", "all"],
   alias: {
@@ -193,6 +194,9 @@ switch (command) {
     );
     console.error(
       "  search <query> [-k <n>]      semantic search (default k=10)",
+    );
+    console.error(
+      "  search --code <query> [-k <n>]  FTS5 source code search",
     );
     console.error(
       "  test <hash>                  run all registered tests for an atom",
@@ -1045,33 +1049,58 @@ async function cmdDescribe(rest: string[]): Promise<void> {
 }
 
 async function cmdSearch(rest: string[]): Promise<void> {
-  const query = rest.join(" ").trim();
+  const isCode = args.code !== undefined;
+  // For --code, the query is in args.code (string flag value)
+  // For normal search, query is the positional args
+  const query = isCode
+    ? (typeof args.code === "string" ? args.code : "")
+    : rest.join(" ").trim();
   if (!query) {
     console.error("usage: zts search <query> [-k <n>]");
+    console.error("       zts search --code <query> [-k <n>]");
     Deno.exit(1);
   }
-  const k = args.k ?? "10";
+  const k = args.k ?? (isCode ? "20" : "10");
   const url = new URL(`${BASE_URL}/search`);
-  url.searchParams.set("q", query);
+  if (isCode) {
+    url.searchParams.set("code", query);
+  } else {
+    url.searchParams.set("q", query);
+  }
   url.searchParams.set("k", k);
   const res = await fetch(url);
   if (!res.ok) {
     console.error(`error: ${res.status} ${await res.text()}`);
     Deno.exit(1);
   }
-  const hits = await res.json() as Array<{
-    hash: string;
-    score: number;
-    url: string;
-    description: string;
-  }>;
-  if (hits.length === 0) {
-    console.log("no results");
-    return;
-  }
-  for (const hit of hits) {
-    const score = hit.score.toFixed(3);
-    console.log(`${hit.hash}  ${score}  ${hit.description}`);
+  if (isCode) {
+    const hits = await res.json() as Array<{
+      hash: string;
+      snippet: string;
+      description: string;
+    }>;
+    if (hits.length === 0) {
+      console.log("no results");
+      return;
+    }
+    for (const hit of hits) {
+      console.log(`${hit.hash}  ${hit.description}`);
+      console.log(`  ${hit.snippet}`);
+    }
+  } else {
+    const hits = await res.json() as Array<{
+      hash: string;
+      score: number;
+      description: string;
+    }>;
+    if (hits.length === 0) {
+      console.log("no results");
+      return;
+    }
+    for (const hit of hits) {
+      const score = hit.score.toFixed(3);
+      console.log(`${hit.hash}  ${score}  ${hit.description}`);
+    }
   }
 }
 
