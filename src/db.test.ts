@@ -271,6 +271,70 @@ Deno.test("Db: listAtoms filters broken", () => {
   d.close();
 });
 
+// --- Supersedes / tops ---
+
+Deno.test("Db: findTops returns self when already a top", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "atom A");
+  const tops = d.findTops(HASH_A, 5);
+  assertEquals(tops.length, 1);
+  assertEquals(tops[0].hash, HASH_A);
+  assertEquals(tops[0].depth, 0);
+  d.close();
+});
+
+Deno.test("Db: findTops follows supersedes chain", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "v1");
+  d.insertAtom(HASH_B, "src", 10, "v2");
+  d.insertAtom(HASH_C, "src", 10, "v3");
+  // B supersedes A, C supersedes B
+  d.insertRelationship(HASH_B, "supersedes", HASH_A);
+  d.insertRelationship(HASH_C, "supersedes", HASH_B);
+  const tops = d.findTops(HASH_A, 5);
+  assertEquals(tops.length, 1);
+  assertEquals(tops[0].hash, HASH_C);
+  assertEquals(tops[0].depth, 2);
+  d.close();
+});
+
+Deno.test("Db: findTops with branching", () => {
+  const d = makeDb();
+  const H1 = "aaaaaaaaaaaaaaaaaaaaaaaaa";
+  const H2 = "bbbbbbbbbbbbbbbbbbbbbbbbb";
+  const H3 = "ccccccccccccccccccccccccc";
+  d.insertAtom(H1, "src", 10, "original");
+  d.insertAtom(H2, "src", 10, "fast variant");
+  d.insertAtom(H3, "src", 10, "full variant");
+  // Both H2 and H3 supersede H1
+  d.insertRelationship(H2, "supersedes", H1);
+  d.insertRelationship(H3, "supersedes", H1);
+  const tops = d.findTops(H1, 5);
+  assertEquals(tops.length, 2);
+  assertEquals(tops[0].depth, 1);
+  assertEquals(tops[1].depth, 1);
+  d.close();
+});
+
+Deno.test("Db: findTops respects limit with level completion", () => {
+  const d = makeDb();
+  const H1 = "aaaaaaaaaaaaaaaaaaaaaaaaa";
+  const H2 = "bbbbbbbbbbbbbbbbbbbbbbbbb";
+  const H3 = "ccccccccccccccccccccccccc";
+  const H4 = "ddddddddddddddddddddddddd".slice(0, 25);
+  d.insertAtom(H1, "src", 10, "original");
+  d.insertAtom(H2, "src", 10, "fast");
+  d.insertAtom(H3, "src", 10, "full");
+  d.insertAtom(H4, "src", 10, "async");
+  d.insertRelationship(H2, "supersedes", H1);
+  d.insertRelationship(H3, "supersedes", H1);
+  d.insertRelationship(H4, "supersedes", H1);
+  // limit=1 but all 3 are at depth 1, so level-complete returns all 3
+  const tops = d.findTops(H1, 1);
+  assertEquals(tops.length, 3);
+  d.close();
+});
+
 // --- Properties ---
 
 Deno.test("Db: setProperty and getProperties", () => {

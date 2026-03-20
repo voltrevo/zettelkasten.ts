@@ -399,6 +399,91 @@ export class Db {
     }));
   }
 
+  // --- Supersedes / tops ---
+
+  /**
+   * BFS up the supersedes graph from `hash`. Returns tops (atoms not
+   * themselves superseded) in BFS depth order, level-complete at `limit`.
+   * If `hash` is already a top, returns it.
+   */
+  findTops(
+    hash: string,
+    limit: number,
+  ): { hash: string; depth: number; description: string }[] {
+    // "superseded by" = atoms where kind=supersedes, to=hash → from supersedes hash
+    // So to go "up" from hash, find relationships where to=hash, kind=supersedes
+    // Those `from` atoms are the ones that supersede hash.
+
+    // Check if hash itself is a top (nothing supersedes it)
+    const supersededBy = this.queryRelationships({
+      to: hash,
+      kind: "supersedes",
+    });
+    if (supersededBy.length === 0) {
+      const desc = this.getDescription(hash) ?? "";
+      return [{ hash, depth: 0, description: desc }];
+    }
+
+    // BFS: queue of { hash, depth }
+    const visited = new Set<string>();
+    visited.add(hash);
+    const queue: { hash: string; depth: number }[] = [];
+    for (const r of supersededBy) {
+      if (!visited.has(r.from)) {
+        visited.add(r.from);
+        queue.push({ hash: r.from, depth: 1 });
+      }
+    }
+
+    const tops: { hash: string; depth: number; description: string }[] = [];
+    let qi = 0;
+
+    while (qi < queue.length) {
+      const current = queue[qi++];
+      const nextSupersededBy = this.queryRelationships({
+        to: current.hash,
+        kind: "supersedes",
+      });
+
+      if (nextSupersededBy.length === 0) {
+        // This is a top
+        const desc = this.getDescription(current.hash) ?? "";
+        tops.push({
+          hash: current.hash,
+          depth: current.depth,
+          description: desc,
+        });
+
+        // Level-complete: if we've hit the limit, finish the current depth level
+        if (tops.length >= limit) {
+          const cutoffDepth = current.depth;
+          // Continue processing remaining items at this depth
+          while (qi < queue.length && queue[qi].depth === cutoffDepth) {
+            const item = queue[qi++];
+            const itemSupersededBy = this.queryRelationships({
+              to: item.hash,
+              kind: "supersedes",
+            });
+            if (itemSupersededBy.length === 0) {
+              const d = this.getDescription(item.hash) ?? "";
+              tops.push({ hash: item.hash, depth: item.depth, description: d });
+            }
+          }
+          break;
+        }
+      } else {
+        for (const r of nextSupersededBy) {
+          if (!visited.has(r.from)) {
+            visited.add(r.from);
+            queue.push({ hash: r.from, depth: current.depth + 1 });
+          }
+        }
+      }
+    }
+
+    return tops;
+  }
+
   // --- Properties ---
 
   setProperty(hash: string, key: string, value?: string): void {

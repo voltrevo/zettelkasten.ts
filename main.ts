@@ -33,8 +33,9 @@ const args = parseArgs(Deno.args, {
     "commentary",
     "op",
     "subject",
+    "limit",
   ],
-  boolean: ["f", "no-description", "broken"],
+  boolean: ["f", "no-description", "broken", "all"],
   alias: {
     d: "description",
     f: "follow",
@@ -154,6 +155,10 @@ switch (command) {
     await cmdEval(rest);
     break;
 
+  case "tops":
+    await cmdTops(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -236,6 +241,9 @@ switch (command) {
     );
     console.error(
       "  eval set <test> <target> ... set expected outcome + commentary",
+    );
+    console.error(
+      "  tops <hash> [--limit N] [--all]  navigate supersedes graph to best",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -754,6 +762,42 @@ async function cmdEval(rest: string[]): Promise<void> {
   } else {
     console.error("usage: zts eval <show|set> ...");
     Deno.exit(1);
+  }
+}
+
+async function cmdTops(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts tops <hash> [--limit N] [--all]");
+    Deno.exit(1);
+  }
+  const url = new URL(`${BASE_URL}/tops/${hash}`);
+  if (args.limit) url.searchParams.set("limit", args.limit);
+  if (args.all) url.searchParams.set("all", "1");
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const tops = await res.json() as Array<{
+    hash: string;
+    depth: number;
+    description: string;
+  }>;
+  if (tops.length === 1 && tops[0].depth === 0) {
+    console.log(
+      `${tops[0].hash} is already a top — not superseded by anything.`,
+    );
+    return;
+  }
+  console.log(`${tops.length} top(s) found.\n`);
+  let currentDepth = -1;
+  for (const t of tops) {
+    if (t.depth !== currentDepth) {
+      currentDepth = t.depth;
+      console.log(`Depth ${currentDepth}:`);
+    }
+    console.log(`  ${t.hash}  ${t.description}`);
   }
 }
 

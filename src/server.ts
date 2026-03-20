@@ -21,7 +21,7 @@ export const PORT = 8000;
 const embedConfig = defaultEmbedConfig();
 const EMBED_DIM = parseInt(Deno.env.get("ZTS_EMBED_DIM") ?? "768");
 
-const KNOWN_RELATIONSHIP_KINDS = new Set(["tests"]);
+const KNOWN_RELATIONSHIP_KINDS = new Set(["tests", "imports", "supersedes"]);
 const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
 
 const PROCESS_TIMEOUT_MS = 5000; // process lifecycle (startup + import + run)
@@ -511,6 +511,22 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
+  // GET /tops/<hash>?limit=N — navigate supersedes graph to tops
+  if (req.method === "GET") {
+    const topsMatch = path.match(/^\/tops\/([a-z0-9]+)$/);
+    if (topsMatch) {
+      const resolved = resolveHash(topsMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const limitParam = url.searchParams.get("limit");
+      const all = url.searchParams.get("all") === "1";
+      const limit = all ? 999999 : (limitParam ? parseInt(limitParam, 10) : 5);
+      const tops = db.findTops(resolved, limit);
+      return new Response(JSON.stringify(tops), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
   // GET /properties?hash=H&key=K — query properties
   if (req.method === "GET" && path === "/properties") {
     const hashParam = url.searchParams.get("hash");
@@ -640,6 +656,30 @@ async function route(req: Request): Promise<Response> {
       body.expected_outcome,
       body.commentary,
     );
+
+    // Auto-register supersedes: if violates_intent, the atom(s) that pass
+    // this test supersede the broken target
+    if (body.expected_outcome === "violates_intent") {
+      const passTargets = db.queryRelationships({
+        from: testHash,
+        kind: "tests",
+      })
+        .filter((r) => r.to !== targetHash)
+        .filter((r) => {
+          const ev = db.getTestEvaluation(testHash, r.to);
+          return !ev || ev.expectedOutcome === "pass";
+        });
+      for (const r of passTargets) {
+        if (db.insertRelationship(r.to, "supersedes", targetHash)) {
+          db.insertLog({
+            op: "rel.create",
+            subject: `${r.to}:${targetHash}`,
+            detail: JSON.stringify({ kind: "supersedes", auto: true }),
+          });
+        }
+      }
+    }
+
     db.insertLog({
       op: "eval.set",
       subject: `${testHash}:${targetHash}`,
