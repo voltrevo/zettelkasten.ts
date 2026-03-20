@@ -6,6 +6,28 @@ import { DATA_DIR, PORT, serve } from "./src/server.ts";
 
 const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
 
+function devHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = Deno.env.get("ZTS_DEV_TOKEN");
+  if (!token) {
+    console.error(
+      "error: ZTS_DEV_TOKEN is not set. Export it to use write commands.",
+    );
+    Deno.exit(1);
+  }
+  return { authorization: `Bearer ${token}`, ...extra };
+}
+
+function adminHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = Deno.env.get("ZTS_ADMIN_TOKEN");
+  if (!token) {
+    console.error(
+      "error: ZTS_ADMIN_TOKEN is not set. Export it to use admin commands.",
+    );
+    Deno.exit(1);
+  }
+  return { authorization: `Bearer ${token}`, ...extra };
+}
+
 const UNIT_NAME = "zettelkasten";
 const LOGROTATE_UNIT = "zts-logrotate";
 const UNIT_DIR = `${Deno.env.get("HOME")}/.config/systemd/user`;
@@ -490,7 +512,7 @@ async function cmdPost(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = devHeaders();
   if (description) {
     headers["x-description"] = description;
   } else {
@@ -521,7 +543,10 @@ async function cmdDelete(rest: string[]): Promise<void> {
     console.error("usage: zts delete <hash>");
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/a/${hash}`, { method: "DELETE" });
+  const res = await fetch(`${BASE_URL}/a/${hash}`, {
+    method: "DELETE",
+    headers: devHeaders(),
+  });
   if (res.status === 204) {
     console.log("deleted");
   } else if (res.status === 409) {
@@ -629,7 +654,7 @@ async function cmdProp(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/properties`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: devHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ hash, key, value }),
     });
     if (!res.ok) {
@@ -646,7 +671,7 @@ async function cmdProp(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/properties`, {
       method: "DELETE",
-      headers: { "content-type": "application/json" },
+      headers: devHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ hash, key }),
     });
     if (!res.ok) {
@@ -692,7 +717,7 @@ async function cmdViolatesIntent(rest: string[]): Promise<void> {
   }
   const res = await fetch(`${BASE_URL}/test-evaluation`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: devHeaders({ "content-type": "application/json" }),
     body: JSON.stringify({
       test: testHash,
       target: targetHash,
@@ -715,7 +740,7 @@ async function cmdFallsShort(rest: string[]): Promise<void> {
   }
   const res = await fetch(`${BASE_URL}/test-evaluation`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: devHeaders({ "content-type": "application/json" }),
     body: JSON.stringify({
       test: testHash,
       target: targetHash,
@@ -774,7 +799,7 @@ async function cmdEval(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/test-evaluation`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: devHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({
         test: testHash,
         target: targetHash,
@@ -924,6 +949,7 @@ async function cmdGoal(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/goals/${name}/done`, {
       method: "POST",
+      headers: devHeaders(),
     });
     if (!res.ok) {
       console.error(`error: ${res.status} ${await res.text()}`);
@@ -938,6 +964,7 @@ async function cmdGoal(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/goals/${name}/undone`, {
       method: "POST",
+      headers: devHeaders(),
     });
     if (!res.ok) {
       console.error(`error: ${res.status} ${await res.text()}`);
@@ -953,7 +980,7 @@ async function cmdGoal(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/goals/${name}/comments`, {
       method: "POST",
-      headers: { "content-type": "text/plain" },
+      headers: devHeaders({ "content-type": "text/plain" }),
       body: text,
     });
     if (!res.ok) {
@@ -1013,7 +1040,7 @@ async function cmdAdmin(rest: string[]): Promise<void> {
     if (args.body) payload.body = args.body;
     const res = await fetch(`${BASE_URL}/goals`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: adminHeaders({ "content-type": "application/json" }),
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -1035,7 +1062,7 @@ async function cmdAdmin(rest: string[]): Promise<void> {
     if (args.body) payload.body = args.body;
     const res = await fetch(`${BASE_URL}/goals/${name}`, {
       method: "PATCH",
-      headers: { "content-type": "application/json" },
+      headers: adminHeaders({ "content-type": "application/json" }),
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -1051,6 +1078,7 @@ async function cmdAdmin(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/goals/${name}`, {
       method: "DELETE",
+      headers: adminHeaders(),
     });
     if (res.status === 204) {
       console.log("deleted");
@@ -1202,7 +1230,7 @@ async function cmdRelate(rest: string[]): Promise<void> {
   }
   const res = await fetch(`${BASE_URL}/relationships`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: devHeaders({ "content-type": "application/json" }),
     body: JSON.stringify({ from, to, kind }),
   });
   if (!res.ok) {
@@ -1223,7 +1251,7 @@ async function cmdUnrelate(rest: string[]): Promise<void> {
   }
   const res = await fetch(`${BASE_URL}/relationships`, {
     method: "DELETE",
-    headers: { "content-type": "application/json" },
+    headers: devHeaders({ "content-type": "application/json" }),
     body: JSON.stringify({ from, to, kind }),
   });
   if (!res.ok) {
@@ -1328,7 +1356,7 @@ async function cmdDescribe(rest: string[]): Promise<void> {
       `${BASE_URL}/a/${hash}/description`,
       {
         method: "POST",
-        headers: { "content-type": "text/plain" },
+        headers: devHeaders({ "content-type": "text/plain" }),
         body: description,
       },
     );

@@ -2,6 +2,12 @@ import { brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bundleZip, extractDependencies } from "./bundle.ts";
+import {
+  type AuthConfig,
+  type AuthTier,
+  checkAuth,
+  resolveAuthTier,
+} from "./auth.ts";
 import { AmbiguousHashError, Db } from "./db.ts";
 import type { Relationship } from "./db.ts";
 import {
@@ -26,8 +32,11 @@ const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
 
 const PROCESS_TIMEOUT_MS = 5000; // process lifecycle (startup + import + run)
 
+const ADMIN_ONLY_PROPERTIES = new Set(["starred"]);
+
 let db: Db;
 let hnswIndex: HnswIndex;
+let authConfig: AuthConfig;
 
 async function gzipSize(text: string): Promise<number> {
   const stream = new CompressionStream("gzip");
@@ -163,6 +172,15 @@ function parseHashFromPath(path: string): string | null {
   return match[1] + match[2] + match[3];
 }
 
+/** Check auth tier for a request. Returns error Response or null. */
+function requireAuth(req: Request, tier: AuthTier): Response | null {
+  const resolved = resolveAuthTier(
+    req.headers.get("authorization"),
+    authConfig,
+  );
+  return checkAuth(resolved, tier);
+}
+
 /** Resolve a hash prefix. Returns full hash or an error Response. */
 function resolveHash(prefix: string): string | Response {
   try {
@@ -206,8 +224,10 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /a — store atom
+  // POST /a — store atom [dev]
   if (req.method === "POST" && path === "/a") {
+    const authErr = requireAuth(req, "dev");
+    if (authErr) return authErr;
     const description = req.headers.get("x-description");
     const allowNoDesc = req.headers.get("x-allow-no-description");
     if (!description && !allowNoDesc) {
@@ -380,10 +400,12 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /a/<hash>/description — update description for an atom
+  // POST /a/<hash>/description — update description [dev]
   if (req.method === "POST") {
     const descMatch = path.match(/^\/a\/([a-z0-9]+)\/description$/);
     if (descMatch) {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
       const resolved = resolveHash(descMatch[1]);
       if (resolved instanceof Response) return resolved;
       const hash = resolved;
@@ -569,7 +591,7 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
-  // POST /properties — set a property { hash, key, value? }
+  // POST /properties — set a property [dev, admin for restricted keys]
   if (req.method === "POST" && path === "/properties") {
     let body: { hash?: string; key?: string; value?: string };
     try {
@@ -581,6 +603,9 @@ async function route(req: Request): Promise<Response> {
     if (!body.hash || !key) {
       return new Response("Missing hash or key", { status: 400 });
     }
+    const propTier = ADMIN_ONLY_PROPERTIES.has(key) ? "admin" : "dev";
+    const authErr = requireAuth(req, propTier as AuthTier);
+    if (authErr) return authErr;
     const resolved = resolveHash(body.hash);
     if (resolved instanceof Response) return resolved;
     db.setProperty(resolved, key, value);
@@ -595,7 +620,7 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
-  // DELETE /properties — remove a property { hash, key }
+  // DELETE /properties — remove a property [dev, admin for restricted keys]
   if (req.method === "DELETE" && path === "/properties") {
     let body: { hash?: string; key?: string };
     try {
@@ -606,6 +631,9 @@ async function route(req: Request): Promise<Response> {
     if (!body.hash || !body.key) {
       return new Response("Missing hash or key", { status: 400 });
     }
+    const propTier = ADMIN_ONLY_PROPERTIES.has(body.key) ? "admin" : "dev";
+    const authErr = requireAuth(req, propTier as AuthTier);
+    if (authErr) return authErr;
     const resolved = resolveHash(body.hash);
     if (resolved instanceof Response) return resolved;
     const removed = db.unsetProperty(resolved, body.key);
@@ -618,8 +646,10 @@ async function route(req: Request): Promise<Response> {
     return new Response("ok\n", { headers: { "content-type": "text/plain" } });
   }
 
-  // POST /test-evaluation — set eval metadata (zts fail / zts eval set)
+  // POST /test-evaluation — set eval metadata [dev]
   if (req.method === "POST" && path === "/test-evaluation") {
+    const authErr = requireAuth(req, "dev");
+    if (authErr) return authErr;
     let body: {
       test?: string;
       target?: string;
@@ -739,6 +769,8 @@ async function route(req: Request): Promise<Response> {
 
   // PATCH /test-evaluation — update commentary
   if (req.method === "PATCH" && path === "/test-evaluation") {
+    const authErr = requireAuth(req, "dev");
+    if (authErr) return authErr;
     let body: { test?: string; target?: string; commentary?: string };
     try {
       body = await req.json();
@@ -811,8 +843,10 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
-  // POST /relationships — add a relationship between two atoms
+  // POST /relationships — add a relationship [dev]
   if (req.method === "POST" && path === "/relationships") {
+    const authErr = requireAuth(req, "dev");
+    if (authErr) return authErr;
     let body: { kind?: string; from?: string; to?: string };
     try {
       body = await req.json();
@@ -865,8 +899,10 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
-  // DELETE /relationships — remove a relationship
+  // DELETE /relationships — remove a relationship [dev]
   if (req.method === "DELETE" && path === "/relationships") {
+    const authErr = requireAuth(req, "dev");
+    if (authErr) return authErr;
     let body: { kind?: string; from?: string; to?: string };
     try {
       body = await req.json();
@@ -889,10 +925,12 @@ async function route(req: Request): Promise<Response> {
     return new Response("ok\n", { headers: { "content-type": "text/plain" } });
   }
 
-  // DELETE /a/<hash> — delete an orphan atom (no relationships)
+  // DELETE /a/<hash> — delete an orphan atom [dev]
   if (req.method === "DELETE") {
     const delMatch = path.match(/^\/a\/([a-z0-9]+)$/);
     if (delMatch) {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
       const resolved = resolveHash(delMatch[1]);
       if (resolved instanceof Response) return resolved;
       const hash = resolved;
@@ -989,8 +1027,10 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /goals — create goal (admin)
+  // POST /goals — create goal [admin]
   if (req.method === "POST" && path === "/goals") {
+    const authErr = requireAuth(req, "admin");
+    if (authErr) return authErr;
     let body: { name?: string; weight?: number; body?: string };
     try {
       body = await req.json();
@@ -1015,10 +1055,12 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
-  // PATCH /goals/<name> — update goal (admin)
+  // PATCH /goals/<name> — update goal [admin]
   if (req.method === "PATCH") {
     const goalMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)$/);
     if (goalMatch) {
+      const authErr = requireAuth(req, "admin");
+      if (authErr) return authErr;
       let body: { weight?: number; body?: string };
       try {
         body = await req.json();
@@ -1035,10 +1077,12 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // DELETE /goals/<name> — delete goal + comments (admin)
+  // DELETE /goals/<name> — delete goal + comments [admin]
   if (req.method === "DELETE") {
     const goalMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)$/);
     if (goalMatch) {
+      const authErr = requireAuth(req, "admin");
+      if (authErr) return authErr;
       if (!db.deleteGoal(goalMatch[1])) {
         return new Response("Goal not found", { status: 404 });
       }
@@ -1047,10 +1091,12 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /goals/<name>/done — mark done
+  // POST /goals/<name>/done — mark done [dev]
   if (req.method === "POST") {
     const doneMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)\/done$/);
     if (doneMatch) {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
       if (!db.markGoalDone(doneMatch[1])) {
         return new Response("Goal not found", { status: 404 });
       }
@@ -1061,10 +1107,12 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /goals/<name>/undone — mark undone
+  // POST /goals/<name>/undone — mark undone [dev]
   if (req.method === "POST") {
     const undoneMatch = path.match(/^\/goals\/([a-zA-Z0-9_-]+)\/undone$/);
     if (undoneMatch) {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
       if (!db.markGoalUndone(undoneMatch[1])) {
         return new Response("Goal not found", { status: 404 });
       }
@@ -1075,12 +1123,14 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /goals/<name>/comments — append comment
+  // POST /goals/<name>/comments — append comment [dev]
   if (req.method === "POST") {
     const commentMatch = path.match(
       /^\/goals\/([a-zA-Z0-9_-]+)\/comments$/,
     );
     if (commentMatch) {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
       const body = (await req.text()).trim();
       if (!body) return new Response("Empty comment", { status: 400 });
       if (!db.addGoalComment(commentMatch[1], body)) {
@@ -1099,6 +1149,11 @@ async function route(req: Request): Promise<Response> {
 
 export async function serve(): Promise<void> {
   await Deno.mkdir(DATA_DIR, { recursive: true });
+
+  authConfig = {
+    devToken: Deno.env.get("ZTS_DEV_TOKEN") || undefined,
+    adminToken: Deno.env.get("ZTS_ADMIN_TOKEN") || undefined,
+  };
 
   db = new Db(`${DATA_DIR}/zts.db`);
   const allVecs = db.getAllEmbeddings();
