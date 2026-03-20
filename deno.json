@@ -21,7 +21,7 @@
   },
   "tasks": {
     "zts": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-import --allow-ffi main.ts",
-    "install": "deno install --global --allow-read --allow-write --allow-net --allow-env --allow-run=git,systemctl,tail,logrotate,deno --allow-import --allow-ffi --config deno.json -f -n zts main.ts",
+    "install": "deno install --global --allow-read --allow-write --allow-net --allow-env --allow-run=systemctl,tail,logrotate,deno --allow-import --allow-ffi --config deno.json -f -n zts main.ts",
     "test": "deno test --allow-env --allow-net --allow-ffi --allow-read --allow-write src/",
     "precommit": "deno fmt && deno check main.ts && deno test --allow-env --allow-net --allow-ffi --allow-read --allow-write src/ && deno lint"
   }

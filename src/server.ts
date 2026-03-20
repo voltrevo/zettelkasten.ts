@@ -2,7 +2,7 @@ import { brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bundleZip, extractDependencies } from "./bundle.ts";
-import { EmbeddingStore, RelationshipStore } from "./db.ts";
+import { Db } from "./db.ts";
 import type { Relationship } from "./db.ts";
 import {
   checkEmbeddingService,
@@ -10,11 +10,12 @@ import {
   fetchEmbedding,
 } from "./embed.ts";
 import { HnswIndex } from "./hnsw.ts";
+import { minify } from "./minify.ts";
 import { validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
 
-export const STORAGE_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
+export const DATA_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
 export const PORT = 8000;
 
 const embedConfig = defaultEmbedConfig();
@@ -25,9 +26,20 @@ const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
 
 const TEST_TIMEOUT_MS = 2000;
 
-let embedStore: EmbeddingStore;
+let db: Db;
 let hnswIndex: HnswIndex;
-let relStore: RelationshipStore;
+
+async function gzipSize(text: string): Promise<number> {
+  const stream = new CompressionStream("gzip");
+  const writer = stream.writable.getWriter();
+  writer.write(new TextEncoder().encode(text));
+  writer.close();
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream.readable as AsyncIterable<Uint8Array>) {
+    chunks.push(chunk);
+  }
+  return chunks.reduce((n, c) => n + c.length, 0);
+}
 
 /** Run test atoms against a target. Returns null on success, or an error Response. */
 async function runTests(
@@ -71,91 +83,58 @@ async function runTests(
   return null;
 }
 
-/** Walk transitive deps of content; return error Response if any lack tests or description. */
-async function checkDepsTestedAndDescribed(
-  content: string,
-): Promise<Response | null> {
+/** Walk transitive deps of content; return error Response if any lack tests. */
+function checkDepsTested(content: string): Response | null {
   const visited = new Set<string>();
   const queue = extractDependencies(content);
   const untested: string[] = [];
-  const undescribed: string[] = [];
 
   while (queue.length > 0) {
     const dep = queue.shift()!;
     if (visited.has(dep)) continue;
     visited.add(dep);
 
-    const tests = relStore.query({ to: dep, kind: "tests" });
+    const tests = db.queryRelationships({ to: dep, kind: "tests" });
     if (tests.length === 0) untested.push(dep);
 
-    if (!embedStore.hasHash(dep)) undescribed.push(dep);
-
     // Walk deeper
-    try {
-      const depContent = await Deno.readTextFile(hashToFilePath(dep));
-      for (const sub of extractDependencies(depContent)) {
+    const depSource = db.getSource(dep);
+    if (depSource) {
+      for (const sub of extractDependencies(depSource)) {
         if (!visited.has(sub)) queue.push(sub);
       }
-    } catch { /* dep file missing — validateAtom already checks imports */ }
+    }
   }
 
-  const issues: string[] = [];
   if (untested.length > 0) {
-    issues.push(`Untested deps: ${untested.join(", ")}`);
-  }
-  if (undescribed.length > 0) {
-    issues.push(`Undescribed deps: ${undescribed.join(", ")}`);
-  }
-  if (issues.length > 0) {
-    return new Response(issues.join("\n"), { status: 422 });
+    return new Response(`Untested deps: ${untested.join(", ")}`, {
+      status: 422,
+    });
   }
   return null;
 }
 
-async function git(...args: string[]): Promise<string> {
-  const cmd = new Deno.Command("git", {
-    args,
-    cwd: STORAGE_DIR,
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const { code, stdout, stderr } = await cmd.output();
-  if (code !== 0) {
-    throw new Error(new TextDecoder().decode(stderr));
-  }
-  return new TextDecoder().decode(stdout).trim();
-}
-
-async function initRepo(): Promise<void> {
-  await Deno.mkdir(STORAGE_DIR, { recursive: true });
-  try {
-    await git("rev-parse", "--git-dir");
-  } catch {
-    await git("init");
-    await git("commit", "--allow-empty", "-m", "init");
-  }
-}
-
-// 25 base36 chars = 25 * log2(36) ≈ 129.2 bits
+// 25 base36 chars = 25 * log2(36) ~ 129.2 bits
 const BASE36_LEN = 25;
 
 function contentHash(content: string): string {
   const bytes = new TextEncoder().encode(content);
   const hash = keccak_256(bytes);
-  // encode first 17 bytes as big-endian bigint → base36, pad to fixed length
   let n = 0n;
   for (const b of hash.slice(0, 17)) n = (n << 8n) | BigInt(b);
   return n.toString(36).padStart(BASE36_LEN, "0").slice(0, BASE36_LEN);
 }
 
-function hashToUrlPath(hash: string): string {
+export function hashToUrlPath(hash: string): string {
   return `/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`;
 }
 
-function hashToFilePath(hash: string): string {
-  return `${STORAGE_DIR}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
-    hash.slice(4)
-  }.ts`;
+function parseHashFromPath(path: string): string | null {
+  const match = path.match(
+    /^\/a\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]{21})\.ts$/,
+  );
+  if (!match) return null;
+  return match[1] + match[2] + match[3];
 }
 
 async function handler(req: Request): Promise<Response> {
@@ -177,27 +156,25 @@ async function route(req: Request): Promise<Response> {
 
   // GET /a/<aa>/<bb>/<rest>.ts — retrieve code by content address
   if (req.method === "GET") {
-    const match = path.match(
-      /^\/a\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+)\.ts$/,
-    );
-    if (match) {
-      const filePath = `${STORAGE_DIR}${path}`;
-      try {
-        const content = await Deno.readTextFile(filePath);
-        return new Response(content, {
-          headers: { "content-type": "application/typescript" },
-        });
-      } catch {
-        return new Response("Not found", { status: 404 });
-      }
+    const hash = parseHashFromPath(path);
+    if (hash) {
+      const source = db.getSource(hash);
+      if (!source) return new Response("Not found", { status: 404 });
+      return new Response(source, {
+        headers: { "content-type": "application/typescript" },
+      });
     }
   }
 
-  // POST /a — store atom, returns content address URL
+  // POST /a — store atom
   if (req.method === "POST" && path === "/a") {
-    const message = req.headers.get("x-commit-message");
-    if (!message) {
-      return new Response("Missing X-Commit-Message header", { status: 400 });
+    const description = req.headers.get("x-description");
+    const allowNoDesc = req.headers.get("x-allow-no-description");
+    if (!description && !allowNoDesc) {
+      return new Response(
+        "Missing X-Description header. Use X-Allow-No-Description: true to opt out.",
+        { status: 400 },
+      );
     }
     const content = await req.text();
     if (!content) {
@@ -211,21 +188,16 @@ async function route(req: Request): Promise<Response> {
 
     const hash = contentHash(content);
     const urlPath = hashToUrlPath(hash);
-    const filePath = hashToFilePath(hash);
 
-    try {
-      await Deno.stat(filePath);
-      // already exists — idempotent, no commit needed
+    // Idempotent: already exists
+    if (db.atomExists(hash)) {
       return new Response(`${urlPath}\n`, {
         status: 200,
         headers: { "content-type": "text/plain" },
       });
-    } catch { /* not found, proceed */ }
+    }
 
-    await Deno.mkdir(filePath.replace(/\/[^/]+$/, ""), { recursive: true });
-    await Deno.writeTextFile(filePath, content);
-
-    // Optional: run tests before committing
+    // Optional: run tests before storing
     const requireTests = req.headers.get("x-require-tests");
     if (requireTests) {
       const testHashes = requireTests.split(",").map((s) => s.trim()).filter(
@@ -233,42 +205,77 @@ async function route(req: Request): Promise<Response> {
       );
       for (const th of testHashes) {
         if (!/^[a-z0-9]{25}$/.test(th)) {
-          await Deno.remove(filePath);
           return new Response(`Invalid test hash: ${th}`, { status: 400 });
         }
-        try {
-          await Deno.stat(hashToFilePath(th));
-        } catch {
-          await Deno.remove(filePath);
+        if (!db.atomExists(th)) {
           return new Response(`Test atom not found: ${th}`, { status: 404 });
         }
       }
+
+      // Verify all transitive deps are tested
+      const depCheck = checkDepsTested(content);
+      if (depCheck) return depCheck;
+
       const fail = await runTests(testHashes, hash);
-      if (fail) {
-        await Deno.remove(filePath);
-        return fail;
+      if (fail) return fail;
+
+      // Store atom first (tests need it served for the idempotent case,
+      // but we already checked it doesn't exist above)
+      const gz = await gzipSize(minify(content));
+      db.insertAtom(hash, content, gz, description ?? "");
+
+      // Auto-register test relationships
+      for (const th of testHashes) {
+        db.insertRelationship(th, "tests", hash);
       }
 
-      // Verify all transitive deps are tested and described
-      const depCheck = await checkDepsTestedAndDescribed(content);
-      if (depCheck) {
-        await Deno.remove(filePath);
-        return depCheck;
+      // Auto-register import relationships
+      for (const dep of extractDependencies(content)) {
+        db.insertRelationship(hash, "imports", dep);
       }
+
+      db.insertLog({
+        op: "atom.create",
+        subject: hash,
+        detail: JSON.stringify({ gzip_size: gz }),
+      });
+
+      // Generate embedding if description provided
+      if (description) {
+        const vec = await fetchEmbedding(description, embedConfig);
+        if (vec) {
+          db.upsertEmbedding(hash, vec, description);
+          hnswIndex.add(hash, vec);
+        }
+      }
+
+      return new Response(`${urlPath}\n`, {
+        status: 201,
+        headers: { "content-type": "text/plain" },
+      });
     }
 
-    const relPath = `a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
-      hash.slice(4)
-    }.ts`;
-    await git("add", relPath);
-    await git("commit", "-m", `${hash.slice(0, 8)}: ${message}`);
+    // No test gate — just store
+    const gz = await gzipSize(minify(content));
+    db.insertAtom(hash, content, gz, description ?? "");
 
-    // Auto-register test relationships on success
-    if (requireTests) {
-      for (
-        const th of requireTests.split(",").map((s) => s.trim()).filter(Boolean)
-      ) {
-        relStore.insert(th, "tests", hash);
+    // Auto-register import relationships
+    for (const dep of extractDependencies(content)) {
+      db.insertRelationship(hash, "imports", dep);
+    }
+
+    db.insertLog({
+      op: "atom.create",
+      subject: hash,
+      detail: JSON.stringify({ gzip_size: gz }),
+    });
+
+    // Generate embedding if description provided
+    if (description) {
+      const vec = await fetchEmbedding(description, embedConfig);
+      if (vec) {
+        db.upsertEmbedding(hash, vec, description);
+        hnswIndex.add(hash, vec);
       }
     }
 
@@ -287,7 +294,11 @@ async function route(req: Request): Promise<Response> {
       try {
         zip = await bundleZip(
           hash,
-          (h) => Deno.readTextFile(hashToFilePath(h)),
+          (h) => {
+            const source = db.getSource(h);
+            if (!source) throw new Error(`Atom not found: ${h}`);
+            return Promise.resolve(source);
+          },
         );
       } catch (e) {
         return new Response((e as Error).message, { status: 404 });
@@ -322,21 +333,19 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /a/<hash>/description — store a searchable description for an atom
+  // POST /a/<hash>/description — update description for an atom
   if (req.method === "POST") {
     const descMatch = path.match(/^\/a\/([a-z0-9]{25})\/description$/);
     if (descMatch) {
       const hash = descMatch[1];
-      // Verify atom exists
-      try {
-        await Deno.stat(hashToFilePath(hash));
-      } catch {
+      if (!db.atomExists(hash)) {
         return new Response("Atom not found", { status: 404 });
       }
       const description = (await req.text()).trim();
       if (!description) {
         return new Response("Empty description", { status: 400 });
       }
+      db.updateDescription(hash, description);
       const vec = await fetchEmbedding(description, embedConfig);
       if (!vec) {
         return new Response(
@@ -344,11 +353,16 @@ async function route(req: Request): Promise<Response> {
           { status: 503, headers: { "content-type": "application/json" } },
         );
       }
-      const isNew = !embedStore.hasHash(hash);
-      embedStore.upsert(hash, description, vec);
+      db.upsertEmbedding(hash, vec, description);
       hnswIndex.add(hash, vec);
+
+      db.insertLog({
+        op: "atom.describe",
+        subject: hash,
+      });
+
       return new Response("ok\n", {
-        status: isNew ? 201 : 200,
+        status: 200,
         headers: { "content-type": "text/plain" },
       });
     }
@@ -358,7 +372,7 @@ async function route(req: Request): Promise<Response> {
   if (req.method === "GET") {
     const descMatch = path.match(/^\/a\/([a-z0-9]{25})\/description$/);
     if (descMatch) {
-      const desc = embedStore.getDescription(descMatch[1]);
+      const desc = db.getDescription(descMatch[1]);
       if (!desc) return new Response("Not found", { status: 404 });
       return new Response(desc, { headers: { "content-type": "text/plain" } });
     }
@@ -387,7 +401,7 @@ async function route(req: Request): Promise<Response> {
       hash,
       score,
       url: hashToUrlPath(hash),
-      description: embedStore.getDescription(hash) ?? "",
+      description: db.getDescription(hash) ?? "",
     }));
     return new Response(JSON.stringify(body), {
       headers: { "content-type": "application/json" },
@@ -417,14 +431,10 @@ async function route(req: Request): Promise<Response> {
     if (!/^[a-z0-9]{25}$/.test(from) || !/^[a-z0-9]{25}$/.test(to)) {
       return new Response("Invalid hash format", { status: 400 });
     }
-    try {
-      await Deno.stat(hashToFilePath(from));
-    } catch {
+    if (!db.atomExists(from)) {
       return new Response(`Atom not found: ${from}`, { status: 404 });
     }
-    try {
-      await Deno.stat(hashToFilePath(to));
-    } catch {
+    if (!db.atomExists(to)) {
       return new Response(`Atom not found: ${to}`, { status: 404 });
     }
 
@@ -433,7 +443,14 @@ async function route(req: Request): Promise<Response> {
       if (fail) return fail;
     }
 
-    const isNew = relStore.insert(from, kind, to);
+    const isNew = db.insertRelationship(from, kind, to);
+
+    db.insertLog({
+      op: "rel.create",
+      subject: `${from}:${to}`,
+      detail: JSON.stringify({ kind }),
+    });
+
     return new Response("ok\n", {
       status: isNew ? 201 : 200,
       headers: { "content-type": "text/plain" },
@@ -452,8 +469,15 @@ async function route(req: Request): Promise<Response> {
     if (!kind || !from || !to) {
       return new Response("Missing kind, from, or to", { status: 400 });
     }
-    const deleted = relStore.delete(from, kind, to);
+    const deleted = db.deleteRelationship(from, kind, to);
     if (!deleted) return new Response("Not found", { status: 404 });
+
+    db.insertLog({
+      op: "rel.delete",
+      subject: `${from}:${to}`,
+      detail: JSON.stringify({ kind }),
+    });
+
     return new Response("ok\n", { headers: { "content-type": "text/plain" } });
   }
 
@@ -462,32 +486,28 @@ async function route(req: Request): Promise<Response> {
     const delMatch = path.match(/^\/a\/([a-z0-9]{25})$/);
     if (delMatch) {
       const hash = delMatch[1];
-      const filePath = hashToFilePath(hash);
-      try {
-        await Deno.stat(filePath);
-      } catch {
+      if (!db.atomExists(hash)) {
         return new Response("Not found", { status: 404 });
       }
-      const outgoing = relStore.query({ from: hash });
+      const outgoing = db.queryRelationships({ from: hash });
       if (outgoing.length > 0) {
         return new Response(
           `Has ${outgoing.length} outgoing relationship(s)`,
           { status: 409 },
         );
       }
-      const incoming = relStore.query({ to: hash });
+      const incoming = db.queryRelationships({ to: hash });
       if (incoming.length > 0) {
         return new Response(
           `Has ${incoming.length} incoming relationship(s)`,
           { status: 409 },
         );
       }
-      await Deno.remove(filePath);
-      const relPath = `a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
-        hash.slice(4)
-      }.ts`;
-      await git("add", relPath);
-      await git("commit", "-m", `${hash.slice(0, 8)}: delete orphan`);
+      db.deleteEmbedding(hash);
+      db.deleteAtom(hash);
+
+      db.insertLog({ op: "atom.delete", subject: hash });
+
       return new Response(null, { status: 204 });
     }
   }
@@ -502,7 +522,7 @@ async function route(req: Request): Promise<Response> {
         status: 400,
       });
     }
-    const rows: Relationship[] = relStore.query({ from, to, kind });
+    const rows: Relationship[] = db.queryRelationships({ from, to, kind });
     return new Response(JSON.stringify(rows), {
       headers: { "content-type": "application/json" },
     });
@@ -512,11 +532,10 @@ async function route(req: Request): Promise<Response> {
 }
 
 export async function serve(): Promise<void> {
-  await initRepo();
+  await Deno.mkdir(DATA_DIR, { recursive: true });
 
-  embedStore = new EmbeddingStore(`${STORAGE_DIR}/zts.db`);
-  relStore = new RelationshipStore(`${STORAGE_DIR}/zts.db`);
-  const allVecs = embedStore.getAll();
+  db = new Db(`${DATA_DIR}/zts.db`);
+  const allVecs = db.getAllEmbeddings();
   hnswIndex = HnswIndex.create(
     EMBED_DIM,
     Math.max(allVecs.size * 2, 1024),
@@ -544,7 +563,7 @@ export async function serve(): Promise<void> {
   Deno.serve({ port: PORT }, handler);
   console.log(`Listening on http://localhost:${PORT}`);
   console.log(
-    "  POST /a                          — store atom (requires X-Commit-Message header)",
+    "  POST /a                          — store atom (requires X-Description header)",
   );
   console.log(
     "  GET  /a/<aa>/<bb>/<rest>.ts      — retrieve code by content address",
@@ -553,7 +572,7 @@ export async function serve(): Promise<void> {
     "  GET  /bundle/<hash>              — download zip bundle of atom + dependencies",
   );
   console.log(
-    "  POST /a/<hash>/description       — store searchable description for an atom",
+    "  POST /a/<hash>/description       — update description for an atom",
   );
   console.log(
     "  GET  /a/<hash>/description       — retrieve description",

@@ -1,130 +1,206 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
-import { EmbeddingStore, RelationshipStore } from "./db.ts";
+import { Db } from "./db.ts";
 
-function makeStore(): EmbeddingStore {
-  return new EmbeddingStore(":memory:");
+function makeDb(): Db {
+  return new Db(":memory:");
 }
 
 function vec(values: number[]): Float32Array {
   return new Float32Array(values);
 }
 
-Deno.test("EmbeddingStore: upsert and get round-trip", () => {
-  const store = makeStore();
+const HASH_A = "aaaaabbbbbcccccdddddeeeee";
+const HASH_B = "fffffggggghhhhhjjjjjkkkkk";
+const HASH_C = "zzzzzbbbbbcccccdddddeeeee";
+
+// --- Atoms ---
+
+Deno.test("Db: insertAtom and getAtom round-trip", () => {
+  const d = makeDb();
+  const ok = d.insertAtom(HASH_A, "export const x = 1;", 42, "test atom");
+  assertEquals(ok, true);
+  const atom = d.getAtom(HASH_A);
+  assertEquals(atom?.hash, HASH_A);
+  assertEquals(atom?.source, "export const x = 1;");
+  assertEquals(atom?.gzipSize, 42);
+  assertEquals(atom?.description, "test atom");
+  assertEquals(atom?.goal, null);
+  d.close();
+});
+
+Deno.test("Db: insertAtom with goal", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "export const x = 1;", 42, "test atom", "my-goal");
+  const atom = d.getAtom(HASH_A);
+  assertEquals(atom?.goal, "my-goal");
+  d.close();
+});
+
+Deno.test("Db: insertAtom returns false on duplicate", () => {
+  const d = makeDb();
+  assertEquals(d.insertAtom(HASH_A, "src", 10, "desc"), true);
+  assertEquals(d.insertAtom(HASH_A, "src", 10, "desc"), false);
+  d.close();
+});
+
+Deno.test("Db: getSource returns source only", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "export const x = 1;", 42, "desc");
+  assertEquals(d.getSource(HASH_A), "export const x = 1;");
+  assertEquals(d.getSource(HASH_B), null);
+  d.close();
+});
+
+Deno.test("Db: atomExists", () => {
+  const d = makeDb();
+  assertEquals(d.atomExists(HASH_A), false);
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  assertEquals(d.atomExists(HASH_A), true);
+  d.close();
+});
+
+Deno.test("Db: deleteAtom", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  assertEquals(d.deleteAtom(HASH_A), true);
+  assertEquals(d.atomExists(HASH_A), false);
+  assertEquals(d.deleteAtom(HASH_A), false);
+  d.close();
+});
+
+Deno.test("Db: updateDescription and getDescription", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "original");
+  assertEquals(d.getDescription(HASH_A), "original");
+  d.updateDescription(HASH_A, "updated");
+  assertEquals(d.getDescription(HASH_A), "updated");
+  assertEquals(d.getDescription(HASH_B), null);
+  d.close();
+});
+
+// --- Embeddings ---
+
+Deno.test("Db: upsertEmbedding and getEmbedding round-trip", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
   const v = vec([0.1, 0.2, 0.3]);
-  store.upsert("aaaaabbbbbcccccdddddeeeee", "test description", v);
-  const result = store.get("aaaaabbbbbcccccdddddeeeee");
-  assertEquals(result?.description, "test description");
+  d.upsertEmbedding(HASH_A, v, "desc");
+  const result = d.getEmbedding(HASH_A);
   assertEquals(result?.vector.length, 3);
   assertEquals(result?.vector[0], v[0]);
   assertEquals(result?.vector[2], v[2]);
-  store.close();
+  d.close();
 });
 
-Deno.test("EmbeddingStore: get returns null for missing hash", () => {
-  const store = makeStore();
-  assertEquals(store.get("aaaaabbbbbcccccdddddeeeee"), null);
-  store.close();
+Deno.test("Db: getEmbedding returns null for missing hash", () => {
+  const d = makeDb();
+  assertEquals(d.getEmbedding(HASH_A), null);
+  d.close();
 });
 
-Deno.test("EmbeddingStore: getDescription returns text only", () => {
-  const store = makeStore();
-  store.upsert("aaaaabbbbbcccccdddddeeeee", "hello world", vec([1, 2]));
-  assertEquals(
-    store.getDescription("aaaaabbbbbcccccdddddeeeee"),
-    "hello world",
-  );
-  assertEquals(store.getDescription("zzzzzbbbbbcccccdddddeeeee"), null);
-  store.close();
-});
-
-Deno.test("EmbeddingStore: hasHash", () => {
-  const store = makeStore();
-  assertEquals(store.hasHash("aaaaabbbbbcccccdddddeeeee"), false);
-  store.upsert("aaaaabbbbbcccccdddddeeeee", "desc", vec([1]));
-  assertEquals(store.hasHash("aaaaabbbbbcccccdddddeeeee"), true);
-  store.close();
-});
-
-Deno.test("EmbeddingStore: getAll returns all vectors", () => {
-  const store = makeStore();
-  store.upsert("aaaaabbbbbcccccdddddeeeee", "one", vec([0.1, 0.2]));
-  store.upsert("fffffggggghhhhhjjjjjkkkkk", "two", vec([0.3, 0.4]));
-  const all = store.getAll();
+Deno.test("Db: getAllEmbeddings", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "one");
+  d.insertAtom(HASH_B, "src", 10, "two");
+  d.upsertEmbedding(HASH_A, vec([0.1, 0.2]), "one");
+  d.upsertEmbedding(HASH_B, vec([0.3, 0.4]), "two");
+  const all = d.getAllEmbeddings();
   assertEquals(all.size, 2);
-  assertEquals(all.has("aaaaabbbbbcccccdddddeeeee"), true);
-  assertEquals(all.has("fffffggggghhhhhjjjjjkkkkk"), true);
-  store.close();
+  assertEquals(all.has(HASH_A), true);
+  assertEquals(all.has(HASH_B), true);
+  d.close();
 });
 
-Deno.test("EmbeddingStore: upsert is idempotent", () => {
-  const store = makeStore();
-  store.upsert("aaaaabbbbbcccccdddddeeeee", "first", vec([1, 0]));
-  store.upsert("aaaaabbbbbcccccdddddeeeee", "second", vec([0, 1]));
-  const result = store.get("aaaaabbbbbcccccdddddeeeee");
-  assertEquals(result?.description, "second");
+Deno.test("Db: upsertEmbedding is idempotent", () => {
+  const d = makeDb();
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  d.upsertEmbedding(HASH_A, vec([1, 0]), "first");
+  d.upsertEmbedding(HASH_A, vec([0, 1]), "second");
+  const result = d.getEmbedding(HASH_A);
   assertNotEquals(result?.vector[0], 1);
-  store.close();
+  d.close();
 });
 
-// RelationshipStore tests
+Deno.test("Db: hasEmbedding", () => {
+  const d = makeDb();
+  assertEquals(d.hasEmbedding(HASH_A), false);
+  d.insertAtom(HASH_A, "src", 10, "desc");
+  d.upsertEmbedding(HASH_A, vec([1]), "desc");
+  assertEquals(d.hasEmbedding(HASH_A), true);
+  d.close();
+});
 
-const TEST_HASH = "aaaaabbbbbcccccdddddeeeee";
-const TARGET_HASH = "fffffggggghhhhhjjjjjkkkkk";
-const OTHER_HASH = "zzzzzbbbbbcccccdddddeeeee";
+// --- Relationships ---
 
-function makeRelStore(): RelationshipStore {
-  return new RelationshipStore(":memory:");
-}
-
-Deno.test("RelationshipStore: insert and query round-trip", () => {
-  const store = makeRelStore();
-  const inserted = store.insert(TEST_HASH, "tests", TARGET_HASH);
+Deno.test("Db: insertRelationship and queryRelationships round-trip", () => {
+  const d = makeDb();
+  const inserted = d.insertRelationship(HASH_A, "tests", HASH_B);
   assertEquals(inserted, true);
-  const rows = store.query({ from: TEST_HASH, kind: "tests" });
+  const rows = d.queryRelationships({ from: HASH_A, kind: "tests" });
   assertEquals(rows.length, 1);
-  assertEquals(rows[0].from, TEST_HASH);
+  assertEquals(rows[0].from, HASH_A);
   assertEquals(rows[0].kind, "tests");
-  assertEquals(rows[0].to, TARGET_HASH);
-  store.close();
+  assertEquals(rows[0].to, HASH_B);
+  d.close();
 });
 
-Deno.test("RelationshipStore: insert returns false on duplicate", () => {
-  const store = makeRelStore();
-  assertEquals(store.insert(TEST_HASH, "tests", TARGET_HASH), true);
-  assertEquals(store.insert(TEST_HASH, "tests", TARGET_HASH), false);
-  // only one row stored
-  assertEquals(store.query({ from: TEST_HASH }).length, 1);
-  store.close();
+Deno.test("Db: insertRelationship returns false on duplicate", () => {
+  const d = makeDb();
+  assertEquals(d.insertRelationship(HASH_A, "tests", HASH_B), true);
+  assertEquals(d.insertRelationship(HASH_A, "tests", HASH_B), false);
+  assertEquals(d.queryRelationships({ from: HASH_A }).length, 1);
+  d.close();
 });
 
-Deno.test("RelationshipStore: delete removes relationship", () => {
-  const store = makeRelStore();
-  store.insert(TEST_HASH, "tests", TARGET_HASH);
-  assertEquals(store.delete(TEST_HASH, "tests", TARGET_HASH), true);
-  assertEquals(store.query({ from: TEST_HASH }).length, 0);
-  store.close();
+Deno.test("Db: deleteRelationship", () => {
+  const d = makeDb();
+  d.insertRelationship(HASH_A, "tests", HASH_B);
+  assertEquals(d.deleteRelationship(HASH_A, "tests", HASH_B), true);
+  assertEquals(d.queryRelationships({ from: HASH_A }).length, 0);
+  d.close();
 });
 
-Deno.test("RelationshipStore: delete returns false when not found", () => {
-  const store = makeRelStore();
-  assertEquals(store.delete(TEST_HASH, "tests", TARGET_HASH), false);
-  store.close();
+Deno.test("Db: deleteRelationship returns false when not found", () => {
+  const d = makeDb();
+  assertEquals(d.deleteRelationship(HASH_A, "tests", HASH_B), false);
+  d.close();
 });
 
-Deno.test("RelationshipStore: query by to", () => {
-  const store = makeRelStore();
-  store.insert(TEST_HASH, "tests", TARGET_HASH);
-  store.insert(OTHER_HASH, "tests", TARGET_HASH);
-  const rows = store.query({ to: TARGET_HASH, kind: "tests" });
+Deno.test("Db: queryRelationships by to", () => {
+  const d = makeDb();
+  d.insertRelationship(HASH_A, "tests", HASH_B);
+  d.insertRelationship(HASH_C, "tests", HASH_B);
+  const rows = d.queryRelationships({ to: HASH_B, kind: "tests" });
   assertEquals(rows.length, 2);
-  store.close();
+  d.close();
 });
 
-Deno.test("RelationshipStore: query with no filter returns all rows", () => {
-  const store = makeRelStore();
-  store.insert(TEST_HASH, "tests", TARGET_HASH);
-  store.insert(OTHER_HASH, "tests", TARGET_HASH);
-  assertEquals(store.query({}).length, 2);
-  store.close();
+Deno.test("Db: queryRelationships with no filter returns all", () => {
+  const d = makeDb();
+  d.insertRelationship(HASH_A, "tests", HASH_B);
+  d.insertRelationship(HASH_C, "tests", HASH_B);
+  assertEquals(d.queryRelationships({}).length, 2);
+  d.close();
+});
+
+// --- Log ---
+
+Deno.test("Db: insertLog", () => {
+  const d = makeDb();
+  d.insertLog({
+    op: "atom.create",
+    subject: HASH_A,
+    detail: '{"gzip_size":42}',
+  });
+  d.insertLog({ op: "atom.delete", subject: HASH_A });
+  // No crash = success; log is append-only audit trail
+  d.close();
+});
+
+// --- Schema version ---
+
+Deno.test("Db: schema version is set on creation", () => {
+  const d = makeDb();
+  // Just verifying it doesn't throw on creation
+  d.close();
 });

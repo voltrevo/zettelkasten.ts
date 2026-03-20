@@ -8,7 +8,7 @@ const ATOM_IMPORT_RE =
 
 export type ValidationError = { message: string };
 
-export const MAX_GZIP_BYTES = 768;
+export const MAX_GZIP_BYTES = 1024;
 
 async function gzipSize(text: string): Promise<number> {
   const stream = new CompressionStream("gzip");
@@ -92,7 +92,9 @@ export async function validateAtom(
   const size = await gzipSize(minify(source));
   if (size > MAX_GZIP_BYTES) {
     errors.push(
-      `atom too large: ${size} bytes gzipped (max ${MAX_GZIP_BYTES})`,
+      `atom is ${size} bytes (min+gz); limit is ${MAX_GZIP_BYTES}. ` +
+        `The server minifies before measuring — removing comments or whitespace will not reduce this number. ` +
+        `Split into smaller atoms instead.`,
     );
   }
 

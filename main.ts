@@ -1,6 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { parseZip } from "./src/bundle.ts";
-import { PORT, serve, STORAGE_DIR } from "./src/server.ts";
+import { DATA_DIR, PORT, serve } from "./src/server.ts";
 
 const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
 
@@ -8,14 +8,20 @@ const UNIT_NAME = "zettelkasten";
 const LOGROTATE_UNIT = "zts-logrotate";
 const UNIT_DIR = `${Deno.env.get("HOME")}/.config/systemd/user`;
 const UNIT_FILE = `${UNIT_DIR}/${UNIT_NAME}.service`;
-const LOG_FILE = `${STORAGE_DIR}/server.log`;
-const LOGROTATE_CONF = `${STORAGE_DIR}/logrotate.conf`;
-const LOGROTATE_STATE = `${STORAGE_DIR}/logrotate.status`;
+const LOG_FILE = `${DATA_DIR}/server.log`;
+const LOGROTATE_CONF = `${DATA_DIR}/logrotate.conf`;
+const LOGROTATE_STATE = `${DATA_DIR}/logrotate.status`;
 
 const args = parseArgs(Deno.args, {
-  string: ["m", "n", "o", "k", "t"],
-  boolean: ["f"],
-  alias: { m: "message", f: "follow", n: "lines", o: "output", t: "tests" },
+  string: ["d", "m", "n", "o", "k", "t"],
+  boolean: ["f", "no-description"],
+  alias: {
+    d: "description",
+    f: "follow",
+    n: "lines",
+    o: "output",
+    t: "tests",
+  },
 });
 
 const RUN_TS = new URL("./run.ts", import.meta.url).pathname;
@@ -90,7 +96,7 @@ switch (command) {
       "  get <path|hash>              retrieve code by content address",
     );
     console.error(
-      "  post -m <msg> [-t <tests>] [file]  store code, optionally gated on tests",
+      "  post -d <desc> [-t <tests>] [file]  store code, optionally gated on tests",
     );
     console.error(
       "  exec <hash|file.zip>         execute root atom's main(globalThis)",
@@ -99,7 +105,7 @@ switch (command) {
       "  bundle <hash> [-o <dir>]     download zip bundle (or extract to dir)",
     );
     console.error(
-      "  describe <hash> -m <text>    store a searchable description for an atom",
+      "  describe <hash> [-d <text>]  set or read description for an atom",
     );
     console.error(
       "  search <query> [-k <n>]      semantic search (default k=10)",
@@ -134,7 +140,7 @@ async function daemonInstall(): Promise<void> {
     "",
     "[Service]",
     `WorkingDirectory=${projectDir}`,
-    `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=git,${denoExec} --allow-ffi ${scriptPath} run`,
+    `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=${denoExec} --allow-ffi ${scriptPath} run`,
     `StandardOutput=append:${LOG_FILE}`,
     `StandardError=append:${LOG_FILE}`,
     "Restart=on-failure",
@@ -177,7 +183,7 @@ async function daemonInstall(): Promise<void> {
   ].join("\n") + "\n";
 
   await Deno.mkdir(UNIT_DIR, { recursive: true });
-  await Deno.mkdir(STORAGE_DIR, { recursive: true });
+  await Deno.mkdir(DATA_DIR, { recursive: true });
   await Deno.writeTextFile(UNIT_FILE, unit);
   await Deno.writeTextFile(LOGROTATE_CONF, logrotateConf);
   await Deno.writeTextFile(
@@ -249,9 +255,13 @@ async function cmdGet(rest: string[]): Promise<void> {
 }
 
 async function cmdPost(rest: string[]): Promise<void> {
-  const message = args.m;
-  if (!message) {
-    console.error("usage: zts post -m <message> [-t <test1,test2,...>] [file]");
+  const description = args.d;
+  const noDescription = args["no-description"];
+  if (!description && !noDescription) {
+    console.error(
+      "usage: zts post -d <description> [-t <test1,test2,...>] [-g <goal>] [file]",
+    );
+    console.error("  use --no-description to opt out of required description");
     Deno.exit(1);
   }
   const file = rest[0];
@@ -264,7 +274,12 @@ async function cmdPost(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
 
-  const headers: Record<string, string> = { "x-commit-message": message };
+  const headers: Record<string, string> = {};
+  if (description) {
+    headers["x-description"] = description;
+  } else {
+    headers["x-allow-no-description"] = "true";
+  }
   if (args.t) {
     headers["x-require-tests"] = args.t;
   }
@@ -385,24 +400,36 @@ async function cmdBundle(rest: string[]): Promise<void> {
 
 async function cmdDescribe(rest: string[]): Promise<void> {
   const hash = rest[0];
-  const description = args.m;
-  if (!hash || !description) {
-    console.error("usage: zts describe <hash> -m <description>");
+  if (!hash) {
+    console.error("usage: zts describe <hash> [-d <description>]");
+    console.error("  without -d: reads back the current description");
     Deno.exit(1);
   }
-  const res = await fetch(
-    `${BASE_URL}/a/${hash}/description`,
-    {
-      method: "POST",
-      headers: { "content-type": "text/plain" },
-      body: description,
-    },
-  );
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+  const description = args.d;
+  if (description) {
+    // Write description
+    const res = await fetch(
+      `${BASE_URL}/a/${hash}/description`,
+      {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: description,
+      },
+    );
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("ok");
+  } else {
+    // Read description
+    const res = await fetch(`${BASE_URL}/a/${hash}/description`);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log(await res.text());
   }
-  console.log("ok");
 }
 
 async function cmdSearch(rest: string[]): Promise<void> {
