@@ -29,6 +29,8 @@ const args = parseArgs(Deno.args, {
     "from",
     "to",
     "kind",
+    "expected",
+    "commentary",
   ],
   boolean: ["f", "no-description", "broken"],
   alias: {
@@ -130,6 +132,18 @@ switch (command) {
     await cmdProp(rest);
     break;
 
+  case "violates_intent":
+    await cmdViolatesIntent(rest);
+    break;
+
+  case "falls_short":
+    await cmdFallsShort(rest);
+    break;
+
+  case "eval":
+    await cmdEval(rest);
+    break;
+
   default:
     console.error("usage: zts <command> [options]");
     console.error("  run                          run server in foreground");
@@ -194,6 +208,18 @@ switch (command) {
     );
     console.error(
       "  prop list <hash>             list all properties on an atom",
+    );
+    console.error(
+      "  violates_intent <test> <atom>  mark correctness defect",
+    );
+    console.error(
+      "  falls_short <test> <atom>    mark quality gap",
+    );
+    console.error(
+      "  eval show <test> <target>    read evaluation metadata",
+    );
+    console.error(
+      "  eval set <test> <target> ... set expected outcome + commentary",
     );
     Deno.exit(command ? 1 : 0);
 }
@@ -542,6 +568,116 @@ async function cmdProp(rest: string[]): Promise<void> {
     }
   } else {
     console.error("usage: zts prop <set|unset|list> ...");
+    Deno.exit(1);
+  }
+}
+
+async function cmdViolatesIntent(rest: string[]): Promise<void> {
+  const testHash = rest[0];
+  const targetHash = rest[1];
+  if (!testHash || !targetHash) {
+    console.error("usage: zts violates_intent <test-hash> <atom-hash>");
+    Deno.exit(1);
+  }
+  const res = await fetch(`${BASE_URL}/test-evaluation`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      test: testHash,
+      target: targetHash,
+      expected_outcome: "violates_intent",
+    }),
+  });
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  console.log("registered: violates_intent");
+}
+
+async function cmdFallsShort(rest: string[]): Promise<void> {
+  const testHash = rest[0];
+  const targetHash = rest[1];
+  if (!testHash || !targetHash) {
+    console.error("usage: zts falls_short <test-hash> <atom-hash>");
+    Deno.exit(1);
+  }
+  const res = await fetch(`${BASE_URL}/test-evaluation`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      test: testHash,
+      target: targetHash,
+      expected_outcome: "falls_short",
+    }),
+  });
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  console.log("registered: falls_short");
+}
+
+async function cmdEval(rest: string[]): Promise<void> {
+  const sub = rest[0];
+  if (sub === "show") {
+    const testHash = rest[1];
+    const targetHash = rest[2];
+    if (!testHash || !targetHash) {
+      console.error("usage: zts eval show <test> <target>");
+      Deno.exit(1);
+    }
+    const url = new URL(`${BASE_URL}/test-evaluation`);
+    url.searchParams.set("test", testHash);
+    url.searchParams.set("target", targetHash);
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    const ev = await res.json() as {
+      testAtom: string;
+      targetAtom: string;
+      expectedOutcome: string;
+      commentary: string | null;
+    };
+    console.log(`test:     ${ev.testAtom}`);
+    console.log(`target:   ${ev.targetAtom}`);
+    console.log(`expected: ${ev.expectedOutcome}`);
+    if (ev.commentary) console.log(`comment:  ${ev.commentary}`);
+  } else if (sub === "set") {
+    const testHash = rest[1];
+    const targetHash = rest[2];
+    if (!testHash || !targetHash) {
+      console.error(
+        "usage: zts eval set <test> <target> --expected <outcome> [--commentary <text>]",
+      );
+      Deno.exit(1);
+    }
+    const expected = args.expected;
+    if (!expected) {
+      console.error(
+        "error: --expected is required (pass/violates_intent/falls_short)",
+      );
+      Deno.exit(1);
+    }
+    const res = await fetch(`${BASE_URL}/test-evaluation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        test: testHash,
+        target: targetHash,
+        expected_outcome: expected,
+        commentary: args.commentary,
+      }),
+    });
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
+    console.log("ok");
+  } else {
+    console.error("usage: zts eval <show|set> ...");
     Deno.exit(1);
   }
 }

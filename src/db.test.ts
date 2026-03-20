@@ -317,6 +317,88 @@ Deno.test("Db: listAtoms filters by prop", () => {
   d.close();
 });
 
+// --- Test evaluation ---
+
+Deno.test("Db: upsertTestEvaluation and getTestEvaluation", () => {
+  const d = makeDb();
+  d.upsertTestEvaluation(HASH_A, HASH_B, "pass");
+  const ev = d.getTestEvaluation(HASH_A, HASH_B);
+  assertEquals(ev?.expectedOutcome, "pass");
+  assertEquals(ev?.commentary, null);
+  d.close();
+});
+
+Deno.test("Db: upsertTestEvaluation with commentary", () => {
+  const d = makeDb();
+  d.upsertTestEvaluation(HASH_A, HASH_B, "violates_intent", "bug in parser");
+  const ev = d.getTestEvaluation(HASH_A, HASH_B);
+  assertEquals(ev?.expectedOutcome, "violates_intent");
+  assertEquals(ev?.commentary, "bug in parser");
+  d.close();
+});
+
+Deno.test("Db: upsertTestEvaluation overwrites", () => {
+  const d = makeDb();
+  d.upsertTestEvaluation(HASH_A, HASH_B, "pass");
+  d.upsertTestEvaluation(HASH_A, HASH_B, "violates_intent", "broken");
+  const ev = d.getTestEvaluation(HASH_A, HASH_B);
+  assertEquals(ev?.expectedOutcome, "violates_intent");
+  d.close();
+});
+
+Deno.test("Db: getEvaluationsForTarget", () => {
+  const d = makeDb();
+  d.upsertTestEvaluation(HASH_A, HASH_B, "pass");
+  d.upsertTestEvaluation(HASH_C, HASH_B, "violates_intent");
+  const evals = d.getEvaluationsForTarget(HASH_B);
+  assertEquals(evals.length, 2);
+  d.close();
+});
+
+// --- Test runs ---
+
+Deno.test("Db: insertTestRun and queryTestRuns", () => {
+  const d = makeDb();
+  d.insertTestRun({
+    testAtom: HASH_A,
+    targetAtom: HASH_B,
+    runBy: "checker",
+    result: "pass",
+    durationMs: 42,
+    details: null,
+  });
+  const runs = d.queryTestRuns({ target: HASH_B });
+  assertEquals(runs.length, 1);
+  assertEquals(runs[0].result, "pass");
+  assertEquals(runs[0].durationMs, 42);
+  assertEquals(runs[0].runBy, "checker");
+  d.close();
+});
+
+Deno.test("Db: queryTestRuns with recent limit", () => {
+  const d = makeDb();
+  d.insertTestRun({
+    testAtom: HASH_A,
+    targetAtom: HASH_B,
+    runBy: "checker",
+    result: "pass",
+    durationMs: 10,
+    details: null,
+  });
+  d.insertTestRun({
+    testAtom: HASH_A,
+    targetAtom: HASH_B,
+    runBy: "checker",
+    result: "fail",
+    durationMs: 20,
+    details: "error",
+  });
+  const runs = d.queryTestRuns({ target: HASH_B, recent: 1 });
+  assertEquals(runs.length, 1);
+  assertEquals(runs[0].result, "fail"); // most recent first
+  d.close();
+});
+
 // --- Schema version ---
 
 Deno.test("Db: schema version is set on creation", () => {

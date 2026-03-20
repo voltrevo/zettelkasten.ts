@@ -24,7 +24,7 @@ const EMBED_DIM = parseInt(Deno.env.get("ZTS_EMBED_DIM") ?? "768");
 const KNOWN_RELATIONSHIP_KINDS = new Set(["tests"]);
 const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
 
-const TEST_TIMEOUT_MS = 2000;
+const PROCESS_TIMEOUT_MS = 5000; // process lifecycle (startup + import + run)
 
 let db: Db;
 let hnswIndex: HnswIndex;
@@ -41,12 +41,13 @@ async function gzipSize(text: string): Promise<number> {
   return chunks.reduce((n, c) => n + c.length, 0);
 }
 
-/** Run test atoms against a target. Returns null on success, or an error Response. */
+/** Run test atoms against a target. Records results in test_runs. Returns null on success, or an error Response. */
 async function runTests(
   testHashes: string[],
   targetHash: string,
 ): Promise<Response | null> {
   const serverUrl = `http://localhost:${PORT}`;
+  const start = performance.now();
   const proc = new Deno.Command(Deno.execPath(), {
     args: [
       "test",
@@ -67,17 +68,42 @@ async function runTests(
   try {
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`Test timed out after ${TEST_TIMEOUT_MS}ms`)),
-        TEST_TIMEOUT_MS,
+        () => reject(new Error(`Test timed out after ${PROCESS_TIMEOUT_MS}ms`)),
+        PROCESS_TIMEOUT_MS,
       )
     );
     output = await Promise.race([proc.output(), timeout]);
   } catch (e) {
+    const durationMs = Math.round(performance.now() - start);
+    for (const th of testHashes) {
+      db.insertTestRun({
+        testAtom: th,
+        targetAtom: targetHash,
+        runBy: "checker",
+        result: "fail",
+        durationMs,
+        details: (e as Error).message,
+      });
+    }
     return new Response((e as Error).message, { status: 422 });
   }
-  if (output.code !== 0) {
-    const text = new TextDecoder().decode(output.stdout) +
-      new TextDecoder().decode(output.stderr);
+  const durationMs = Math.round(performance.now() - start);
+  const passed = output.code === 0;
+  const text = new TextDecoder().decode(output.stdout) +
+    new TextDecoder().decode(output.stderr);
+
+  for (const th of testHashes) {
+    db.insertTestRun({
+      testAtom: th,
+      targetAtom: targetHash,
+      runBy: "checker",
+      result: passed ? "pass" : "fail",
+      durationMs,
+      details: passed ? null : text,
+    });
+  }
+
+  if (!passed) {
     return new Response(text, { status: 422 });
   }
   return null;
@@ -239,9 +265,10 @@ async function route(req: Request): Promise<Response> {
       const gz = await gzipSize(minify(content));
       db.insertAtom(hash, content, gz, description ?? "", goal);
 
-      // Auto-register test relationships
+      // Auto-register test relationships + evaluation metadata
       for (const th of testHashes) {
         db.insertRelationship(th, "tests", hash);
+        db.upsertTestEvaluation(th, hash, "pass");
       }
 
       // Auto-register import relationships
@@ -549,6 +576,160 @@ async function route(req: Request): Promise<Response> {
     return new Response("ok\n", { headers: { "content-type": "text/plain" } });
   }
 
+  // POST /test-evaluation — set eval metadata (zts fail / zts eval set)
+  if (req.method === "POST" && path === "/test-evaluation") {
+    let body: {
+      test?: string;
+      target?: string;
+      expected_outcome?: string;
+      commentary?: string;
+    };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    if (!body.test || !body.target || !body.expected_outcome) {
+      return new Response("Missing test, target, or expected_outcome", {
+        status: 400,
+      });
+    }
+    if (
+      !["pass", "violates_intent", "falls_short"].includes(
+        body.expected_outcome,
+      )
+    ) {
+      return new Response(
+        "expected_outcome must be pass, violates_intent, or falls_short",
+        { status: 400 },
+      );
+    }
+    const testHash = resolveHash(body.test);
+    if (testHash instanceof Response) return testHash;
+    const targetHash = resolveHash(body.target);
+    if (targetHash instanceof Response) return targetHash;
+
+    // For violates_intent: verify test passes against at least one other atom
+    if (body.expected_outcome === "violates_intent") {
+      const passEvals = db.queryRelationships({ from: testHash, kind: "tests" })
+        .filter((r) => r.to !== targetHash)
+        .filter((r) => {
+          const ev = db.getTestEvaluation(testHash, r.to);
+          return !ev || ev.expectedOutcome === "pass";
+        });
+      if (passEvals.length === 0) {
+        return new Response(
+          "Cannot mark violates_intent: test must pass against at least one other atom first",
+          { status: 422 },
+        );
+      }
+
+      // Verify the test actually fails against the target
+      const fail = await runTests([testHash], targetHash);
+      if (!fail) {
+        return new Response(
+          "Cannot mark violates_intent: test passes against this atom (expected failure)",
+          { status: 422 },
+        );
+      }
+    }
+
+    db.upsertTestEvaluation(
+      testHash,
+      targetHash,
+      body.expected_outcome,
+      body.commentary,
+    );
+    db.insertLog({
+      op: "eval.set",
+      subject: `${testHash}:${targetHash}`,
+      detail: JSON.stringify({
+        expected_outcome: body.expected_outcome,
+      }),
+    });
+    return new Response("ok\n", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    });
+  }
+
+  // GET /test-evaluation?test=T&target=A — read eval metadata
+  if (req.method === "GET" && path === "/test-evaluation") {
+    const testParam = url.searchParams.get("test");
+    const targetParam = url.searchParams.get("target");
+    if (!testParam || !targetParam) {
+      return new Response("Missing ?test= and ?target=", { status: 400 });
+    }
+    const testHash = resolveHash(testParam);
+    if (testHash instanceof Response) return testHash;
+    const targetHash = resolveHash(targetParam);
+    if (targetHash instanceof Response) return targetHash;
+    const ev = db.getTestEvaluation(testHash, targetHash);
+    if (!ev) return new Response("Not found", { status: 404 });
+    return new Response(JSON.stringify(ev), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // PATCH /test-evaluation — update commentary
+  if (req.method === "PATCH" && path === "/test-evaluation") {
+    let body: { test?: string; target?: string; commentary?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    if (!body.test || !body.target) {
+      return new Response("Missing test or target", { status: 400 });
+    }
+    const testHash = resolveHash(body.test);
+    if (testHash instanceof Response) return testHash;
+    const targetHash = resolveHash(body.target);
+    if (targetHash instanceof Response) return targetHash;
+    const ev = db.getTestEvaluation(testHash, targetHash);
+    if (!ev) return new Response("Not found", { status: 404 });
+    db.upsertTestEvaluation(
+      testHash,
+      targetHash,
+      ev.expectedOutcome,
+      body.commentary,
+    );
+    return new Response("ok\n", { headers: { "content-type": "text/plain" } });
+  }
+
+  // GET /test-runs?target=H&test=H&recent=N — query test run history
+  if (req.method === "GET" && path === "/test-runs") {
+    const targetParam = url.searchParams.get("target");
+    const testParam = url.searchParams.get("test");
+    const recentParam = url.searchParams.get("recent");
+    const target = targetParam
+      ? (() => {
+        const r = resolveHash(targetParam);
+        return r instanceof Response ? null : r;
+      })()
+      : undefined;
+    if (targetParam && !target) {
+      return new Response("Target not found", { status: 404 });
+    }
+    const test = testParam
+      ? (() => {
+        const r = resolveHash(testParam);
+        return r instanceof Response ? null : r;
+      })()
+      : undefined;
+    if (testParam && !test) {
+      return new Response("Test not found", { status: 404 });
+    }
+    const runs = db.queryTestRuns({
+      target: target ?? undefined,
+      test: test ?? undefined,
+      recent: recentParam ? parseInt(recentParam, 10) : undefined,
+    });
+    return new Response(JSON.stringify(runs), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   // POST /relationships — add a relationship between two atoms
   if (req.method === "POST" && path === "/relationships") {
     let body: { kind?: string; from?: string; to?: string };
@@ -585,6 +766,11 @@ async function route(req: Request): Promise<Response> {
     }
 
     const isNew = db.insertRelationship(from, kind, to);
+
+    // Record evaluation metadata for test relationships
+    if (kind === "tests" && isNew) {
+      db.upsertTestEvaluation(from, to, "pass");
+    }
 
     db.insertLog({
       op: "rel.create",

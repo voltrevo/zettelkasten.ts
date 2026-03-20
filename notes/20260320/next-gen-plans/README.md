@@ -135,23 +135,24 @@ starred
 
 Create `test_evaluation` and `test_runs` tables. Implement:
 
-- `zts fail <test> <broken>` — mark correctness defect (checker verifies the
-  test fails against the target; requires test passes against a fix)
-- `zts benchmark <test> <target>` — mark improvement opportunity
+- `zts violates_intent <test> <atom>` — mark correctness defect (runs test
+  via server, verifies failure; requires test passes against a fix)
+- `zts falls_short <test> <atom>` — mark quality gap
 - `zts eval show <test> <target>` — read evaluation metadata
-- `zts eval set <test> <target> --commentary "why"` — annotate
-- `zts test <hash>` — run applicable tests via checker
+- `zts eval set <test> <target> --expected <outcome> [--commentary "why"]` — set
+  expected_outcome (pass/violates_intent/falls_short) and commentary
+- `zts test <hash>` — run applicable tests (expected_outcome=pass only)
 - `zts exec` warns on `violates_intent`, notes on `falls_short`
+- Test runs recorded in `test_runs` with duration_ms (observational)
+- Timeouts: 5s process lifecycle, 2s test execution within Deno
 
 ```
-$ zts fail a1b2c d3e4f
-checker: test a1b2c fails against d3e4f (as expected)
-registered: violates_intent (contract)
-auto-registered: kind=supersedes from=<fix> to=d3e4f
+$ zts violates_intent a1b2c d3e4f
+registered: violates_intent
 
 $ zts exec d3e4f
 warning: d3e4f has known correctness defects:
-  test a1b2c (contract): violates intent
+  test a1b2c: violates intent
   Run `zts tops d3e4f` to find corrected alternatives.
 ```
 
@@ -159,14 +160,14 @@ warning: d3e4f has known correctness defects:
 
 ### 7. Test run history + audit log CLI
 
-CLI coverage for the `test_runs` and `log` tables so agents never need
-curl. Rename the existing `zts log` (server process file tail) to
-`zts server-log` to free the name.
+CLI coverage for the `test_runs` and `log` tables so agents never need curl.
+Rename the existing `zts log` (server process file tail) to `zts server-log` to
+free the name.
 
-- `zts runs <hash> [--recent N]` — query test execution history for an
-  atom (pass/fail, duration, run_by)
-- `zts log [--recent N] [--op X] [--subject X]` — query the structured
-  audit trail (atom.create, rel.create, goal.done, etc.)
+- `zts runs <hash> [--recent N]` — query test execution history for an atom
+  (pass/fail, duration, run_by)
+- `zts log [--recent N] [--op X] [--subject X]` — query the structured audit
+  trail (atom.create, rel.create, goal.done, etc.)
 
 Server endpoints: `GET /test-runs?target=<hash>&recent=N`,
 `GET /log?recent=N&op=X&subject=X`.

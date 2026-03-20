@@ -39,6 +39,26 @@ CREATE TABLE IF NOT EXISTS properties (
   PRIMARY KEY (hash, key)
 );
 
+CREATE TABLE IF NOT EXISTS test_evaluation (
+  test_atom        TEXT NOT NULL,
+  target_atom      TEXT NOT NULL,
+  expected_outcome TEXT NOT NULL
+    CHECK (expected_outcome IN ('pass', 'violates_intent', 'falls_short')),
+  commentary       TEXT,
+  PRIMARY KEY (test_atom, target_atom)
+);
+
+CREATE TABLE IF NOT EXISTS test_runs (
+  id          INTEGER PRIMARY KEY,
+  test_atom   TEXT NOT NULL,
+  target_atom TEXT NOT NULL,
+  run_by      TEXT NOT NULL CHECK (run_by IN ('checker', 'agent')),
+  result      TEXT NOT NULL CHECK (result IN ('pass', 'fail')),
+  duration_ms INTEGER,
+  details     TEXT,
+  ran_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS log (
   id         INTEGER PRIMARY KEY,
   op         TEXT NOT NULL,
@@ -69,6 +89,24 @@ export interface Relationship {
   kind: string;
   to: string;
   createdAt: string;
+}
+
+export interface TestEvaluation {
+  testAtom: string;
+  targetAtom: string;
+  expectedOutcome: "pass" | "violates_intent" | "falls_short";
+  commentary: string | null;
+}
+
+export interface TestRun {
+  id: number;
+  testAtom: string;
+  targetAtom: string;
+  runBy: "checker" | "agent";
+  result: "pass" | "fail";
+  durationMs: number | null;
+  details: string | null;
+  ranAt: string;
 }
 
 export interface LogEntry {
@@ -380,6 +418,124 @@ export class Db {
     return this.db.prepare(
       "SELECT key, value FROM properties WHERE hash = ?",
     ).all<{ key: string; value: string | null }>(hash);
+  }
+
+  // --- Test evaluation ---
+
+  upsertTestEvaluation(
+    testAtom: string,
+    targetAtom: string,
+    expectedOutcome: string,
+    commentary?: string,
+  ): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO test_evaluation
+       (test_atom, target_atom, expected_outcome, commentary)
+       VALUES (?, ?, ?, ?)`,
+    ).run(testAtom, targetAtom, expectedOutcome, commentary ?? null);
+  }
+
+  getTestEvaluation(
+    testAtom: string,
+    targetAtom: string,
+  ): TestEvaluation | null {
+    const row = this.db.prepare(
+      `SELECT test_atom, target_atom, expected_outcome, commentary
+       FROM test_evaluation WHERE test_atom = ? AND target_atom = ?`,
+    ).get<{
+      test_atom: string;
+      target_atom: string;
+      expected_outcome: string;
+      commentary: string | null;
+    }>(testAtom, targetAtom);
+    if (!row) return null;
+    return {
+      testAtom: row.test_atom,
+      targetAtom: row.target_atom,
+      expectedOutcome: row
+        .expected_outcome as TestEvaluation["expectedOutcome"],
+      commentary: row.commentary,
+    };
+  }
+
+  /** Get all evaluations for a target atom. */
+  getEvaluationsForTarget(targetAtom: string): TestEvaluation[] {
+    const rows = this.db.prepare(
+      `SELECT test_atom, target_atom, expected_outcome, commentary
+       FROM test_evaluation WHERE target_atom = ?`,
+    ).all<{
+      test_atom: string;
+      target_atom: string;
+      expected_outcome: string;
+      commentary: string | null;
+    }>(targetAtom);
+    return rows.map((r) => ({
+      testAtom: r.test_atom,
+      targetAtom: r.target_atom,
+      expectedOutcome: r.expected_outcome as TestEvaluation["expectedOutcome"],
+      commentary: r.commentary,
+    }));
+  }
+
+  // --- Test runs ---
+
+  insertTestRun(run: Omit<TestRun, "id" | "ranAt">): void {
+    this.db.prepare(
+      `INSERT INTO test_runs (test_atom, target_atom, run_by, result, duration_ms, details)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      run.testAtom,
+      run.targetAtom,
+      run.runBy,
+      run.result,
+      run.durationMs ?? null,
+      run.details ?? null,
+    );
+  }
+
+  queryTestRuns(opts: {
+    target?: string;
+    test?: string;
+    recent?: number;
+  }): TestRun[] {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+    if (opts.target) {
+      conditions.push("target_atom = ?");
+      params.push(opts.target);
+    }
+    if (opts.test) {
+      conditions.push("test_atom = ?");
+      params.push(opts.test);
+    }
+    const where = conditions.length > 0
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+    const limit = opts.recent ? `LIMIT ?` : "";
+    if (opts.recent) params.push(opts.recent);
+    const rows = this.db.prepare(
+      `SELECT id, test_atom, target_atom, run_by, result, duration_ms, details, ran_at
+       FROM test_runs ${where} ORDER BY id DESC ${limit}`,
+    ).all<{
+      id: number;
+      test_atom: string;
+      target_atom: string;
+      run_by: string;
+      result: string;
+      duration_ms: number | null;
+      details: string | null;
+      ran_at: string;
+    }>(...params);
+    return rows.map((r) => ({
+      id: r.id,
+      testAtom: r.test_atom,
+      targetAtom: r.target_atom,
+      runBy: r.run_by as TestRun["runBy"],
+      result: r.result as TestRun["result"],
+      durationMs: r.duration_ms,
+      details: r.details,
+      ranAt: r.ran_at,
+    }));
   }
 
   // --- Log ---

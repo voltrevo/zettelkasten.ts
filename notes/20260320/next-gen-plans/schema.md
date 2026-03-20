@@ -91,26 +91,23 @@ not history.
 
 ```sql
 CREATE TABLE test_evaluation (
-  test_atom       TEXT NOT NULL,
-  target_atom     TEXT NOT NULL,
-  mode            TEXT NOT NULL CHECK (mode IN ('contract', 'benchmark')),
+  test_atom        TEXT NOT NULL,
+  target_atom      TEXT NOT NULL,
   expected_outcome TEXT NOT NULL
     CHECK (expected_outcome IN ('pass', 'violates_intent', 'falls_short')),
-  commentary      TEXT,
+  commentary       TEXT,
   PRIMARY KEY (test_atom, target_atom)
 );
 ```
 
-- `contract` + `pass`: the test verifies correctness and is expected to pass.
-  Default for all `-t` gate registrations.
-- `contract` + `violates_intent`: the test reproduces a bug. Objective evidence
-  of a correctness defect. Registered via `zts fail`.
-- `benchmark` + `falls_short`: the test measures a quality dimension the atom
-  does not meet. Not broken, just outclassed. Registered via `zts benchmark`.
-- `commentary`: free-text explanation, set via `zts eval set`.
-
-If no `test_evaluation` row exists for a (test, target) pair that has a
-`kind=tests` relationship, `expected_outcome=pass` is assumed.
+- `pass`: the test is expected to pass. Default for all `-t` gate registrations.
+  If no row exists, `pass` is assumed.
+- `violates_intent`: the test reproduces a correctness defect. Objective
+  evidence the atom is broken. Registered via `zts fail`.
+- `falls_short`: the atom doesn't meet some quality bar the test expresses. Not
+  broken — just outclassed on some dimension. Deliberately flexible. Set via
+  `zts eval set`.
+- `commentary`: free-text explanation.
 
 ### test_runs
 
