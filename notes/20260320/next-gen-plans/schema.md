@@ -249,6 +249,6 @@ CREATE TABLE IF NOT EXISTS prompts (
 ```
 
 Admin-editable prompt overrides. Empty table = use compiled defaults from
-`src/prompts.ts`. Row exists = override. `zts show-prompt` and the worker
-check DB first, fall back to compiled default. Web UI shows both active
-and default when an override exists.
+`src/prompts.ts`. Row exists = override. `zts show-prompt` and the worker check
+DB first, fall back to compiled default. Web UI shows both active and default
+when an override exists.

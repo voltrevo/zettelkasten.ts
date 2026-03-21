@@ -28,8 +28,8 @@ deno task zts server-log [-f]
 ```
 
 Requires `ZTS_DEV_TOKEN` and `ZTS_ADMIN_TOKEN` in environment. The server
-refuses to start without them. Tokens are saved to `~/.local/share/zettelkasten/env`
-for the systemd unit.
+refuses to start without them. Tokens are saved to
+`~/.local/share/zettelkasten/env` for the systemd unit.
 
 ## Atom rules (enforced at submission)
 
@@ -77,14 +77,16 @@ env            ← auth tokens for systemd
 ```
 
 Hash format: 25-char base36 keccak-256 (first 17 bytes of digest). The full hash
-is `xx` + `yy` + `<21chars>`. Hash prefixes work everywhere — the server resolves
-unambiguous prefixes to full hashes automatically.
+is `xx` + `yy` + `<21chars>`. Hash prefixes work everywhere — the server
+resolves unambiguous prefixes to full hashes automatically.
 
 ## Auth
 
 Bearer tokens, three tiers:
+
 - **unauthed** — reads (get, list, search, info, rels, etc.)
-- **dev** — writes (post, delete, describe, relate, test, eval, goal done/comment, etc.)
+- **dev** — writes (post, delete, describe, relate, test, eval, goal
+  done/comment, etc.)
 - **admin** — goal CRUD, starred property, prompt overrides
 
 The CLI auto-includes the right token from `ZTS_DEV_TOKEN` / `ZTS_ADMIN_TOKEN`
@@ -196,8 +198,8 @@ zts post -d "brief description" -t "<test1>,<test2>" /tmp/myatom.ts
 import { myFn } from "../../xx/yy/<rest>.ts";
 ```
 
-Descriptions are required (`-d`). Tests are required (`-t`). Use `--no-tests`
-or `--no-description` to opt out explicitly.
+Descriptions are required (`-d`). Tests are required (`-t`). Use `--no-tests` or
+`--no-description` to opt out explicitly.
 
 Description must be **ASCII only** — Unicode characters cause a ByteString error
 in the HTTP header.
@@ -262,8 +264,8 @@ Description:
 
 ## Marking broken atoms
 
-If you discover an atom is incorrect, prefix its description with `BROKEN:`
-and explain the specific failure. Also check dependents (`zts dependents <hash>`)
+If you discover an atom is incorrect, prefix its description with `BROKEN:` and
+explain the specific failure. Also check dependents (`zts dependents <hash>`)
 and mark any that inherit the breakage.
 
 ```sh
@@ -272,20 +274,20 @@ zts describe <hash> -d "BROKEN: <what is wrong>. <original description>"
 
 ## Key source files
 
-| File                 | Purpose                                                          |
-| -------------------- | ---------------------------------------------------------------- |
-| `src/server.ts`      | HTTP server: routes, atom storage, search, auth enforcement      |
-| `src/db.ts`          | Unified SQLite wrapper: all tables, schema migrations            |
-| `src/validate.ts`    | Atom validation: export count, import paths, size limit          |
-| `src/bundle.ts`      | Dependency graph walking, ZIP build/parse                        |
-| `src/minify.ts`      | Comment stripping + whitespace collapse (for size check)         |
-| `src/embed.ts`       | Embedding API client (Ollama), cosine similarity, topK           |
-| `src/auth.ts`        | Auth tier resolution and checking                                |
+| File                 | Purpose                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| `src/server.ts`      | HTTP server: routes, atom storage, search, auth enforcement        |
+| `src/db.ts`          | Unified SQLite wrapper: all tables, schema migrations              |
+| `src/validate.ts`    | Atom validation: export count, import paths, size limit            |
+| `src/bundle.ts`      | Dependency graph walking, ZIP build/parse                          |
+| `src/minify.ts`      | Comment stripping + whitespace collapse (for size check)           |
+| `src/embed.ts`       | Embedding API client (Ollama), cosine similarity, topK             |
+| `src/auth.ts`        | Auth tier resolution and checking                                  |
 | `src/prompts.ts`     | Compiled default agent prompts (context, iteration, retrospective) |
-| `src/worker.ts`      | Agent loop: workspace management, claude subprocess, handovers   |
-| `src/test-runner.ts` | Subprocess entry point for running test atoms against a target   |
-| `main.ts`            | CLI entry point: all subcommands                                 |
-| `run.ts`             | Universal exec entry point: imports root atom's `main`, calls it |
+| `src/worker.ts`      | Agent loop: workspace management, claude subprocess, handovers     |
+| `src/test-runner.ts` | Subprocess entry point for running test atoms against a target     |
+| `main.ts`            | CLI entry point: all subcommands                                   |
+| `run.ts`             | Universal exec entry point: imports root atom's `main`, calls it   |
 
 ## Writing test atoms
 
@@ -344,9 +346,11 @@ loop:
 Key properties:
 
 - **Stack-driven**: `tail -1` = depth-first, naturally reaches leaves first
-- **Description-first**: write description before code, search on it to find reusable atoms
+- **Description-first**: write description before code, search on it to find
+  reusable atoms
 - **Tests before code**: test atoms don't import the target, so they can exist
   before it does
 - **Atomic quality gate**: conditional post = atom only enters corpus if tests
   pass; relationships auto-registered on success
-- **Self-healing**: bad tests get cleaned up; failed posts don't pollute the corpus
+- **Self-healing**: bad tests get cleaned up; failed posts don't pollute the
+  corpus

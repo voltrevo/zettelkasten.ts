@@ -135,8 +135,8 @@ starred
 
 Create `test_evaluation` and `test_runs` tables. Implement:
 
-- `zts violates_intent <test> <atom>` — mark correctness defect (runs test
-  via server, verifies failure; requires test passes against a fix)
+- `zts violates_intent <test> <atom>` — mark correctness defect (runs test via
+  server, verifies failure; requires test passes against a fix)
 - `zts falls_short <test> <atom>` — mark quality gap
 - `zts eval show <test> <target>` — read evaluation metadata
 - `zts eval set <test> <target> --expected <outcome> [--commentary "why"]` — set
@@ -288,11 +288,11 @@ The agent loop runs directly in Deno — no shell scripts, no piping to bash.
 
 **CLI commands:**
 
-- `zts worker [--channel <name>] [--max-turns N] [--once]` — runs the
-  agent loop. Spawns `claude` as a subprocess with `-p` prompt. Manages
-  handovers, captures output, backs off on error.
-- `zts worker setup [--channel <name>] [--workspace <dir>]` — creates
-  workspace directory structure.
+- `zts worker [--channel <name>] [--max-turns N] [--once]` — runs the agent
+  loop. Spawns `claude` as a subprocess with `-p` prompt. Manages handovers,
+  captures output, backs off on error.
+- `zts worker setup [--channel <name>] [--workspace <dir>]` — creates workspace
+  directory structure.
 - `zts show-prompt context` — prints the active context prompt
 - `zts show-prompt iteration` — prints the active iteration prompt
 - `zts show-prompt retrospective` — prints the active retrospective prompt
@@ -300,19 +300,18 @@ The agent loop runs directly in Deno — no shell scripts, no piping to bash.
 **Prompts:**
 
 Compiled defaults in `src/prompts.ts`. The context prompt is passed via
-`claude -p` (NOT via CLAUDE.md — more explicit, self-contained, no risk
-of accidental edits). Later (web UI step), admin can edit prompts via UI;
-overrides stored in a `prompts` table, `show-prompt` shows the active
-version.
+`claude -p` (NOT via CLAUDE.md — more explicit, self-contained, no risk of
+accidental edits). Later (web UI step), admin can edit prompts via UI; overrides
+stored in a `prompts` table, `show-prompt` shows the active version.
 
 **Retrospectives:**
 
-Every 30 iterations, the worker substitutes the retrospective prompt
-instead of the iteration prompt. The agent reviews recent handovers,
-highlights wins, identifies friction, and suggests improvements. Output
-is saved to `workspace/retrospectives/retro-NNNN.md`. The last 2-3
-retrospectives are included as context for the next retrospective.
-Retrospectives are informational only — admin decides what changes.
+Every 30 iterations, the worker substitutes the retrospective prompt instead of
+the iteration prompt. The agent reviews recent handovers, highlights wins,
+identifies friction, and suggests improvements. Output is saved to
+`workspace/retrospectives/retro-NNNN.md`. The last 2-3 retrospectives are
+included as context for the next retrospective. Retrospectives are informational
+only — admin decides what changes.
 
 **Workspace layout:**
 
@@ -407,11 +406,10 @@ $ open http://localhost:8000/ui/
 
 Apply deferred small improvements that were noted during implementation:
 
-- **relate/unrelate argument order**: change from `<from> <to> [kind]`
-  to `<from> <kind> <to>` so it reads naturally ("A tests B").
-  Two-arg form still defaults to imports.
+- **relate/unrelate argument order**: change from `<from> <to> [kind]` to
+  `<from> <kind> <to>` so it reads naturally ("A tests B"). Two-arg form still
+  defaults to imports.
 - **Tests required by default**: `-t <tests>` required on `zts post`,
-  `--no-tests` to opt out. Every atom has tests unless explicitly
-  opted out.
-- **Prompt text fixes**: update any prompts or docs that reference the
-  old `-t` opt-in behavior.
+  `--no-tests` to opt out. Every atom has tests unless explicitly opted out.
+- **Prompt text fixes**: update any prompts or docs that reference the old `-t`
+  opt-in behavior.

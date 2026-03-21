@@ -276,8 +276,8 @@ zts worker --channel bricklane --max-turns 80
 zts worker --once   # single iteration
 ```
 
-The worker runs the loop directly in Deno — no shell scripts. It spawns
-`claude` as a subprocess with `-p` for each iteration.
+The worker runs the loop directly in Deno — no shell scripts. It spawns `claude`
+as a subprocess with `-p` for each iteration.
 
 ### Prompts
 
@@ -288,8 +288,8 @@ Three prompts ship as compiled defaults in `src/prompts.ts`:
 - **retrospective** — review last 30 iterations, reflect, suggest
 
 Prompts are passed via `claude -p`, not CLAUDE.md. More explicit,
-self-contained, no risk of accidental edits. Admin can view and override
-prompts via the web UI (stored in `prompts` table, overrides defaults).
+self-contained, no risk of accidental edits. Admin can view and override prompts
+via the web UI (stored in `prompts` table, overrides defaults).
 
 ```sh
 zts show-prompt context        # inspect active context prompt
@@ -299,12 +299,12 @@ zts show-prompt retrospective  # inspect active retrospective prompt
 
 ### Retrospectives
 
-Every 30 iterations, the worker uses the retrospective prompt instead of
-the iteration prompt. The agent reviews recent handovers, highlights wins,
+Every 30 iterations, the worker uses the retrospective prompt instead of the
+iteration prompt. The agent reviews recent handovers, highlights wins,
 identifies friction, suggests improvements. Output saved to
-`workspace/retrospectives/retro-NNNN.md`. Last 2-3 retrospectives are
-included as context for continuity. Retrospectives are informational —
-admin decides what changes.
+`workspace/retrospectives/retro-NNNN.md`. Last 2-3 retrospectives are included
+as context for continuity. Retrospectives are informational — admin decides what
+changes.
 
 ### `zts worker setup`
 
