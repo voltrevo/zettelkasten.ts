@@ -3,7 +3,7 @@
 ## What this is
 
 A Deno server that stores **immutable TypeScript atoms** in a content-addressed,
-git-backed flat corpus. Each atom is a single TypeScript module with exactly one
+SQLite-backed corpus. Each atom is a single TypeScript module with exactly one
 value export. Atoms are identified by a 25-character base36 keccak-256 hash.
 
 The vision is a persistent code knowledge base where AI agents accumulate
@@ -24,24 +24,12 @@ Daemon commands (systemd user unit):
 deno task zts start        # install + enable + start
 deno task zts stop         # disable + stop
 deno task zts restart
-deno task zts log [-f]
+deno task zts server-log [-f]
 ```
 
-## Server endpoints
-
-```
-POST /a                              store atom (X-Commit-Message header required)
-                                     optional X-Require-Tests: hash1,hash2,...
-                                     runs tests before committing; auto-registers relationships
-                                     returns /a/xx/yy/<rest>.ts on success
-GET  /a/<aa>/<bb>/<rest>.ts          retrieve atom by content address
-DELETE /a/<hash>                     delete orphan atom (409 if has relationships)
-GET  /bundle/<hash>                  download ZIP of atom + all transitive deps
-GET  /search?q=<text>[&k=10]        semantic nearest-neighbor search (requires Ollama)
-POST /relationships                  add a relationship between two atoms
-DELETE /relationships                remove a relationship
-GET  /relationships?from=&to=&kind= query relationships (at least one param required)
-```
+Requires `ZTS_DEV_TOKEN` and `ZTS_ADMIN_TOKEN` in environment. The server
+refuses to start without them. Tokens are saved to `~/.local/share/zettelkasten/env`
+for the systemd unit.
 
 ## Atom rules (enforced at submission)
 
@@ -53,7 +41,7 @@ GET  /relationships?from=&to=&kind= query relationships (at least one param requ
    `../../xx/yy/<21chars>.ts`. No npm packages, no JSR, no URLs, no bare
    specifiers.
 4. **No exported `let`** — all exports must be `const` or function/class/enum.
-5. **Size limit** — ≤ 768 bytes gzipped after minification.
+5. **Size limit** — ≤ 1024 bytes gzipped after minification.
 
 ## Capability convention (Cap)
 
@@ -78,59 +66,141 @@ intersection of those plus any capabilities it needs directly.
 
 ## Storage layout
 
-Atoms live at `~/.local/share/zettelkasten/` (a git repo):
+All data lives in `~/.local/share/zettelkasten/`:
 
 ```
-a/
-  xx/          ← first 2 chars of hash
-    yy/        ← next 2 chars
-      <21chars>.ts
-zts.db         ← SQLite: embedding vectors + relationship graph
-server.log     ← append-only log
+zts.db         ← SQLite: atoms, embeddings, relationships, properties,
+                 test_evaluation, test_runs, goals, goal_comments,
+                 prompts, log, schema_version, atoms_fts
+server.log     ← append-only process log
+env            ← auth tokens for systemd
 ```
 
 Hash format: 25-char base36 keccak-256 (first 17 bytes of digest). The full hash
-is `xx` + `yy` + `<21chars>`. Use `hashToUrlPath` / `hashToFilePath` in
-server.ts for conversions.
+is `xx` + `yy` + `<21chars>`. Hash prefixes work everywhere — the server resolves
+unambiguous prefixes to full hashes automatically.
+
+## Auth
+
+Bearer tokens, three tiers:
+- **unauthed** — reads (get, list, search, info, rels, etc.)
+- **dev** — writes (post, delete, describe, relate, test, eval, goal done/comment, etc.)
+- **admin** — goal CRUD, starred property, prompt overrides
+
+The CLI auto-includes the right token from `ZTS_DEV_TOKEN` / `ZTS_ADMIN_TOKEN`
+environment variables.
+
+## CLI reference
+
+### Corpus
+
+```sh
+zts post -d "desc" -t <tests> [-g <goal>] <file>   # store atom (tests + desc required)
+zts post -d "desc" --no-tests <file>                # skip test requirement
+zts post --no-description --no-tests <file>         # skip both (not recommended)
+zts get <hash>                                       # retrieve source
+zts describe <hash> [-d "text"]                      # read or update description
+zts list [--recent N] [--goal G] [--broken] [--prop K]  # list atoms
+zts info <hash>                                      # full atom info
+zts size <file>                                      # estimate gzip size
+zts search <query> [-k N]                            # semantic search on descriptions
+zts search --code <query> [-k N]                     # FTS5 search on source code
+zts delete <hash>                                    # delete orphan (409 if has rels)
+zts exec <hash> [args...]                            # run atom's main(globalThis)
+zts bundle <hash> [-o <dir>]                         # ZIP of atom + transitive deps
+```
+
+### Relationships
+
+```sh
+zts rels [--from H] [--to H] [--kind K]   # query (at least one filter required)
+zts dependents <hash>                      # atoms that import this one
+zts relate <from> <kind> <to>              # add (reads naturally: "A tests B")
+zts unrelate <from> <kind> <to>            # remove
+zts tops <hash> [--limit N] [--all]        # navigate supersedes graph upward
+```
+
+Kinds: `imports`, `tests`, `supersedes`.
+
+### Testing
+
+```sh
+zts test <hash>                            # run applicable tests (expected_outcome=pass)
+zts violates_intent <test> <atom>          # mark correctness defect
+zts falls_short <test> <atom>              # mark quality gap
+zts eval show <test> <target>              # read eval metadata
+zts eval set <test> <target> --expected <outcome> [--commentary <text>]
+zts runs <hash> [--recent N]               # test run history
+```
+
+### Properties
+
+```sh
+zts prop set <hash> <key> [value]          # set (admin-only keys auto-detected)
+zts prop unset <hash> <key>                # remove
+zts prop list <hash>                       # list
+```
+
+### Goals
+
+```sh
+zts goal pick [--n N]                      # weighted random sample of active goals
+zts goal show <name>                       # full body + all comments
+zts goal list [--done] [--all]             # list goals
+zts goal done <name>                       # mark complete
+zts goal undone <name>                     # revert
+zts goal comment <name> "text"             # append observation
+zts goal comments <name> [--recent N]      # read observations
+```
+
+### Admin
+
+```sh
+zts admin goal add <name> [--weight N] [--body <text>]
+zts admin goal set <name> [--weight N] [--body <text>]
+zts admin goal delete <name>
+zts show-prompt <context|iteration|retrospective>
+```
+
+### Status & logs
+
+```sh
+zts status [--since YYYY-MM-DD]            # corpus health summary
+zts log [--recent N] [--op X] [--subject X]  # audit log
+zts server-log [-f] [-n <lines>]           # process log (tail)
+```
+
+### Agent loop
+
+```sh
+zts worker run [flags]                     # start the agent loop
+zts worker setup [flags]                   # create workspace
+zts worker stop [flags]                    # stop a running worker
+
+# Flags: --channel, --max-turns, --max-iters, --once, --model,
+#   --dangerously-skip-permissions, --context-prompt, --iteration-prompt,
+#   --retrospective-prompt, --workspaces-dir
+```
+
+All commands support `-h`/`--help` for detailed usage.
 
 ## CLI workflow for adding atoms
 
 ```sh
 # Write atom to a temp file, then post:
-deno task zts post -m "brief description" /tmp/myatom.ts
-# → /a/xx/yy/<rest>.ts   (201 = new, 200 = already existed)
-
-# Post with test gate (tests must pass before atom is stored):
-deno task zts post -m "description" -t "<test-hash1>,<test-hash2>" /tmp/myatom.ts
+zts post -d "brief description" -t "<test1>,<test2>" /tmp/myatom.ts
 # → 201 if tests pass (relationships auto-registered), 422 if tests fail
 
 # The hash is: xxyy<rest>
 # Reference from another atom:
 import { myFn } from "../../xx/yy/<rest>.ts";
-
-# Retrieve:
-deno task zts get <hash>
-
-# Execute (atom must export main(cap)):
-deno task zts exec <hash> [args...]
-
-# Bundle to directory:
-deno task zts bundle <hash> -o <parent-dir>
-# extracts to <parent-dir>/<hash8>/run.ts + <parent-dir>/<hash8>/a/...
-
-# Delete an orphan atom (no relationships):
-deno task zts delete <hash>
-# → 204 if deleted, 409 if has relationships, 404 if not found
 ```
 
-To make an atom searchable, post a description after submitting it:
+Descriptions are required (`-d`). Tests are required (`-t`). Use `--no-tests`
+or `--no-description` to opt out explicitly.
 
-```sh
-deno task zts describe <hash> -m "<description>"
-```
-
-Commit message in `x-commit-message` / `-m` must be **ASCII only** — Unicode
-characters (e.g. `φ`) cause a ByteString error in the HTTP header.
+Description must be **ASCII only** — Unicode characters cause a ByteString error
+in the HTTP header.
 
 The server validates atoms before storing (export count, import paths, size
 limit after minification). Just post and let the server reject — don't try to
@@ -144,11 +214,17 @@ them. A passing test on a leaf atom gives confidence to rely on it in
 higher-level atoms. Discovering a bug in a leaf after the whole tree is built
 means the entire tree may be suspect.
 
+## Description comment convention
+
+The first line(s) of every atom must be a comment containing the description,
+identical to what is passed via `-d`. Comments are stripped by the minifier and
+cost nothing against the size limit.
+
 ## Writing atom descriptions (for search)
 
-Descriptions are embedded with a text model and matched against natural-language
-queries. A good description makes the atom discoverable from queries like "find
-GCD of two numbers" or "check if a number is prime".
+Descriptions are embedded with nomic-embed-text (via Ollama) and matched against
+natural-language queries. A good description makes the atom discoverable.
+Longer, more detailed descriptions produce significantly better search matches.
 
 **Prompt template** — use this when generating a description for a newly posted
 atom:
@@ -184,18 +260,31 @@ Description:
 - Naming implementation details without explaining behavior: "Uses a while loop"
 - Paraphrasing the type signature: "Accepts two numbers, returns a number"
 
+## Marking broken atoms
+
+If you discover an atom is incorrect, prefix its description with `BROKEN:`
+and explain the specific failure. Also check dependents (`zts dependents <hash>`)
+and mark any that inherit the breakage.
+
+```sh
+zts describe <hash> -d "BROKEN: <what is wrong>. <original description>"
+```
+
 ## Key source files
 
 | File                 | Purpose                                                          |
 | -------------------- | ---------------------------------------------------------------- |
-| `src/server.ts`      | HTTP server: routes, atom storage, git commits, search           |
+| `src/server.ts`      | HTTP server: routes, atom storage, search, auth enforcement      |
+| `src/db.ts`          | Unified SQLite wrapper: all tables, schema migrations            |
 | `src/validate.ts`    | Atom validation: export count, import paths, size limit          |
 | `src/bundle.ts`      | Dependency graph walking, ZIP build/parse                        |
 | `src/minify.ts`      | Comment stripping + whitespace collapse (for size check)         |
-| `src/db.ts`          | SQLite wrapper: embeddings + `RelationshipStore`                 |
-| `src/embed.ts`       | Embedding API client (Ollama/OpenAI), cosine similarity, topK    |
+| `src/embed.ts`       | Embedding API client (Ollama), cosine similarity, topK           |
+| `src/auth.ts`        | Auth tier resolution and checking                                |
+| `src/prompts.ts`     | Compiled default agent prompts (context, iteration, retrospective) |
+| `src/worker.ts`      | Agent loop: workspace management, claude subprocess, handovers   |
 | `src/test-runner.ts` | Subprocess entry point for running test atoms against a target   |
-| `main.ts`            | CLI entry point: run/start/stop/log/get/post/exec/bundle/test    |
+| `main.ts`            | CLI entry point: all subcommands                                 |
 | `run.ts`             | Universal exec entry point: imports root atom's `main`, calls it |
 
 ## Writing test atoms
@@ -220,25 +309,6 @@ Rules:
 - No constructor arguments — the test creates its own mocks internally
 - No real I/O; the test subprocess runs with `--allow-import=<server>` only
 
-### Registering a test relationship
-
-```sh
-# POST /relationships runs the test before storing the relationship.
-# 201 = new, 200 = already registered, 422 = test failed.
-curl -s -X POST http://localhost:8000/relationships \
-  -H "content-type: application/json" \
-  -d '{"kind":"tests","from":"<test-hash>","to":"<target-hash>"}'
-```
-
-### Running tests for an atom
-
-```sh
-zts test <target-hash>
-```
-
-Fetches all registered test hashes from the server, then spawns a local
-`deno test` process importing each test atom from the server.
-
 ## TDD process for building atom trees
 
 Use this process when building a tree of atoms with test coverage:
@@ -253,16 +323,18 @@ loop:
   # --- first visit: design and draft ---
   If this is a new need (no draft yet):
     1. Design the atom's interface (what it exports, what deps it needs)
-    2. Search corpus for existing atoms that satisfy dependencies
-    3. Write test atoms FIRST — post them normally (tests don't import target)
-    4. Write the implementation atom (save draft to /tmp/)
-    5. If some deps are hypothetical:
+    2. Write the full description first — what it computes, inputs/outputs, edge cases
+    3. Search on that description: zts search "<your full description>"
+       If a usable match exists, reuse it. If not, you already have the -d text.
+    4. Write test atoms FIRST — post them normally (tests don't import target)
+    5. Write the implementation atom (save draft to /tmp/)
+    6. If some deps are hypothetical:
        - Append missing dep names to $NEEDS
        - Continue loop (picks up deepest need next via tail -1)
 
   # --- deps satisfied: post and finish ---
-  Post with test gate: zts post -m "desc" -t "<test1>,<test2>" /tmp/draft.ts
-  - On 201: pop $CURRENT from needs file, add description
+  Post with test gate: zts post -d "desc" -t "<test1>,<test2>" /tmp/draft.ts
+  - On 201: pop $CURRENT from needs file
   - On 422: fix atom, retry
 
   Cleanup: if a test is bad, zts delete <test-hash>
@@ -272,28 +344,9 @@ loop:
 Key properties:
 
 - **Stack-driven**: `tail -1` = depth-first, naturally reaches leaves first
+- **Description-first**: write description before code, search on it to find reusable atoms
 - **Tests before code**: test atoms don't import the target, so they can exist
   before it does
 - **Atomic quality gate**: conditional post = atom only enters corpus if tests
   pass; relationships auto-registered on success
-- **Self-healing**: bad tests get cleaned up; failed posts don't pollute git
-
-## What is not yet implemented
-
-From VISION.md (incomplete items):
-
-- **Discovery endpoints** — no `/list`, no tag-based or relationship-based
-  search
-- **Graph inspection** — no reverse-dependency queries, no `/graph` endpoint
-- **Test result history** — pass/fail relationship exists but no per-run timing
-  or history
-- **Metadata extraction** — export names/types not indexed beyond the embedding
-- **Normalization** — atoms stored verbatim, no canonical formatting enforced
-- **Execution planning / graph safety checks** — `zts exec` runs without
-  checking for known problems or better alternatives
-- **Default export rejection** — `export default` is not yet rejected by
-  validate
-- **Singleton/complexity heuristics** — top-level mutation, static mutable
-  fields not yet detected
-
-See `VISION.md` for the full specification and implementation status checklist.
+- **Self-healing**: bad tests get cleaned up; failed posts don't pollute the corpus
