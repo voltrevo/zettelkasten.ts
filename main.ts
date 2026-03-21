@@ -106,11 +106,14 @@ const args = parseArgs(Deno.args, {
   boolean: [
     "f",
     "no-description",
+    "no-tests",
     "broken",
     "all",
     "done",
     "once",
     "dangerously-skip-permissions",
+    "h",
+    "help",
   ],
   alias: {
     d: "description",
@@ -124,6 +127,187 @@ const args = parseArgs(Deno.args, {
 
 const RUN_TS = new URL("./run.ts", import.meta.url).pathname;
 const [command, ...rest] = args._ as string[];
+
+const SUBCOMMAND_HELP: Record<string, string> = {
+  run: `zts run
+  Start the server in foreground. Requires ZTS_DEV_TOKEN and ZTS_ADMIN_TOKEN.`,
+
+  start: `zts start
+  Install systemd user service and start the daemon.
+  Tokens are saved to ${DATA_DIR}/env and loaded by the service.
+  Requires ZTS_DEV_TOKEN and ZTS_ADMIN_TOKEN in environment.`,
+
+  stop: `zts stop
+  Stop and disable the systemd daemon.`,
+
+  restart: `zts restart
+  Restart the systemd daemon.`,
+
+  "server-log": `zts server-log [-f] [-n <lines>]
+  Show the server process log (tail).
+  -f          follow (live output)
+  -n <lines>  number of lines (default: 50)`,
+
+  log: `zts log [--recent N] [--op X] [--subject X]
+  Query the structured audit log.
+  --recent N      last N entries
+  --op X          filter by operation (atom.create, rel.create, goal.done, etc.)
+  --subject X     filter by subject (hash or goal name)`,
+
+  runs: `zts runs <hash> [--recent N]
+  Show test run history for an atom.
+  --recent N   last N runs`,
+
+  get: `zts get <hash>
+  Retrieve and print atom source code. Hash prefixes accepted.`,
+
+  post:
+    `zts post -d <description> -t <test-hashes> [-g <goal>] [--no-tests] [--no-description] <file>
+  Store a new atom.
+  -d <desc>          description (required unless --no-description)
+  -t <hash,hash,...> test hashes to run before storing (required unless --no-tests)
+  -g <goal>          tag atom with a goal
+  --no-tests         skip test requirement
+  --no-description   skip description requirement`,
+
+  exec: `zts exec <hash|file.zip> [args...]
+  Execute an atom's main(globalThis) in an isolated Deno subprocess.
+  Pass a hash to fetch from server, or a .zip bundle file.`,
+
+  bundle: `zts bundle <hash> [-o <dir>]
+  Download a ZIP bundle of an atom and all transitive dependencies.
+  -o <dir>   extract to directory instead of writing ZIP to stdout`,
+
+  describe: `zts describe <hash> [-d <text>]
+  Without -d: read back the current description.
+  With -d:    update the description.`,
+
+  search: `zts search <query> [-k N]
+zts search --code <query> [-k N]
+  Semantic search on descriptions (default), or FTS5 search on source code.
+  -k N       max results (default: 10 for semantic, 20 for code)
+  --code     search source code instead of descriptions`,
+
+  test: `zts test <hash>
+  Run all applicable tests (expected_outcome=pass) for an atom.`,
+
+  delete: `zts delete <hash>
+  Delete an orphan atom (no relationships). Returns 409 if atom has relationships.`,
+
+  list: `zts list [--recent N] [--goal G] [--broken] [--prop K]
+  List atoms.
+  --recent N   last N atoms by creation time
+  --goal G     filter by goal name
+  --broken     only atoms with BROKEN: prefix in description
+  --prop K     only atoms with property K set`,
+
+  info: `zts info <hash>
+  Full atom info: source, description, gzip size, goal, creation date,
+  imports, imported-by, tests, tested-by, properties.`,
+
+  size: `zts size <file>
+  Estimate gzip size (client-side minify + compress). Shows whether the
+  atom fits within the ${MAX_GZIP_BYTES}-byte limit.`,
+
+  rels: `zts rels [--from H] [--to H] [--kind K]
+  Query relationships. At least one filter required.
+  --from H    relationships from this atom
+  --to H      relationships to this atom
+  --kind K    filter by kind (imports, tests, supersedes)`,
+
+  dependents: `zts dependents <hash>
+  List atoms that import this one (shorthand for rels --to <hash> --kind imports).`,
+
+  relate: `zts relate <from> <kind> <to>
+  Add a relationship. Reads naturally: "A tests B", "A supersedes B".
+  kind: imports, tests, supersedes
+  For kind=tests, the test is run before the relationship is stored.`,
+
+  unrelate: `zts unrelate <from> <kind> <to>
+  Remove a relationship.`,
+
+  prop: `zts prop set <hash> <key> [value]
+zts prop unset <hash> <key>
+zts prop list <hash>
+  Manage properties on atoms. Admin-only keys (e.g. starred) require ZTS_ADMIN_TOKEN.`,
+
+  violates_intent: `zts violates_intent <test-hash> <atom-hash>
+  Mark a correctness defect. The test must already pass against at least one
+  other atom. The server verifies the test actually fails against the target.
+  Auto-registers kind=supersedes from the passing atom to the broken one.`,
+
+  falls_short: `zts falls_short <test-hash> <atom-hash>
+  Mark a quality gap. The atom doesn't meet some bar the test expresses.
+  Not broken — just outclassed on some dimension.`,
+
+  eval: `zts eval show <test> <target>
+  Read evaluation metadata for a test-target pair.
+
+zts eval set <test> <target> --expected <outcome> [--commentary <text>]
+  Set evaluation metadata.
+  --expected    pass, violates_intent, or falls_short
+  --commentary  free-text explanation`,
+
+  tops: `zts tops <hash> [--limit N] [--all]
+  Navigate the supersedes graph upward from <hash> to find current best
+  alternatives (tops = atoms not themselves superseded).
+  --limit N   max tops to show (default: 5, level-complete)
+  --all       show all tops`,
+
+  goal:
+    `zts goal pick [--n N]                weighted random sample of active goals
+zts goal show <name>                  full body + all comments
+zts goal list [--done] [--all]        list goals
+zts goal done <name>                  mark complete
+zts goal undone <name>                revert completion
+zts goal comment <name> <text>        append observation
+zts goal comments <name> [--recent N] read observations`,
+
+  admin: `zts admin goal add <name> [--weight N] [--body <text>]
+  Create a goal. Requires ZTS_ADMIN_TOKEN.
+
+zts admin goal set <name> [--weight N] [--body <text>]
+  Update a goal's weight or body.
+
+zts admin goal delete <name>
+  Delete a goal and all its comments.`,
+
+  status: `zts status [--since YYYY-MM-DD]
+  Corpus health summary: total atoms, defects, superseded, recent activity,
+  per-goal stats. Default window: last 7 days.`,
+
+  "show-prompt": `zts show-prompt <context|iteration|retrospective>
+  Print the active agent prompt. Shows DB override if one exists,
+  otherwise the compiled default.`,
+
+  worker: `zts worker [run] [flags]     start the agent loop
+zts worker setup [flags]     create workspace for a channel
+zts worker stop [flags]      stop a running worker
+
+Flags:
+  --channel <name>             channel name (default: default)
+  --workspaces-dir <path>      workspaces root (default: ./workspaces)
+  --max-turns <N>              agent turns per iteration (default: 100)
+  --max-iters <N>              max iterations, 0=infinite (default: 0)
+  --once                       run one iteration then exit
+  --model <model>              agent model (e.g. sonnet, opus)
+  --dangerously-skip-permissions  skip agent permission prompts
+  --context-prompt <file>      override context prompt from file
+  --iteration-prompt <file>    override iteration prompt from file
+  --retrospective-prompt <file>  override retrospective prompt from file`,
+};
+
+// Check for per-subcommand help
+if (
+  command &&
+  (args.h || args.help || rest.includes("-h") || rest.includes("--help"))
+) {
+  const help = SUBCOMMAND_HELP[command];
+  if (help) {
+    console.log(help);
+    Deno.exit(0);
+  }
+}
 
 switch (command) {
   case "run":
@@ -262,8 +446,8 @@ switch (command) {
     console.error(`usage: zts <command> [options]
 
 Corpus:
-  post -d <desc> [-t <tests>] [-g <goal>] <file>
-                               store atom
+  post -d <desc> -t <tests> [-g <goal>] <file>
+                               store atom (tests required, --no-tests to skip)
   get <hash>                   retrieve source
   delete <hash>                delete orphan atom
   list [--recent N] [--goal G] [--broken] [--prop K]
@@ -280,8 +464,8 @@ Relationships:
   rels [--from H] [--to H] [--kind K]
                                query relationships
   dependents <hash>            atoms that import this one
-  relate <from> <to> [kind]    add relationship (default: imports)
-  unrelate <from> <to> [kind]  remove relationship
+  relate <from> <kind> <to>    add relationship (e.g. A tests B)
+  unrelate <from> <kind> <to>  remove relationship
   tops <hash> [--limit N] [--all]
                                navigate supersedes graph to best
 
@@ -537,11 +721,19 @@ async function cmdGet(rest: string[]): Promise<void> {
 async function cmdPost(rest: string[]): Promise<void> {
   const description = args.d;
   const noDescription = args["no-description"];
+  const noTests = args["no-tests"];
   if (!description && !noDescription) {
     console.error(
-      "usage: zts post -d <description> [-t <test1,test2,...>] [-g <goal>] [file]",
+      "usage: zts post -d <description> -t <test1,test2,...> [-g <goal>] [file]",
     );
-    console.error("  use --no-description to opt out of required description");
+    console.error("  --no-description   opt out of required description");
+    console.error("  --no-tests         opt out of required tests");
+    Deno.exit(1);
+  }
+  if (!args.t && !noTests) {
+    console.error(
+      "error: -t <test-hashes> is required. Use --no-tests to opt out.",
+    );
     Deno.exit(1);
   }
   const file = rest[0];
@@ -684,6 +876,15 @@ async function cmdInfo(rest: string[]): Promise<void> {
   console.log(info.source);
 }
 
+const ADMIN_ONLY_PROPS = new Set(["starred"]);
+
+function propHeaders(
+  key: string,
+  extra?: Record<string, string>,
+): Record<string, string> {
+  return ADMIN_ONLY_PROPS.has(key) ? adminHeaders(extra) : devHeaders(extra);
+}
+
 async function cmdProp(rest: string[]): Promise<void> {
   const sub = rest[0];
   if (sub === "set") {
@@ -696,7 +897,7 @@ async function cmdProp(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/properties`, {
       method: "POST",
-      headers: devHeaders({ "content-type": "application/json" }),
+      headers: propHeaders(key, { "content-type": "application/json" }),
       body: JSON.stringify({ hash, key, value }),
     });
     if (!res.ok) {
@@ -713,7 +914,7 @@ async function cmdProp(rest: string[]): Promise<void> {
     }
     const res = await fetch(`${BASE_URL}/properties`, {
       method: "DELETE",
-      headers: devHeaders({ "content-type": "application/json" }),
+      headers: propHeaders(key, { "content-type": "application/json" }),
       body: JSON.stringify({ hash, key }),
     });
     if (!res.ok) {
@@ -1367,11 +1568,12 @@ async function cmdDependents(rest: string[]): Promise<void> {
 
 async function cmdRelate(rest: string[]): Promise<void> {
   const from = rest[0];
-  const to = rest[1];
-  const kind = rest[2] ?? "imports";
-  if (!from || !to) {
-    console.error("usage: zts relate <from> <to> [kind]");
-    console.error("  kind defaults to 'imports'");
+  const kind = rest[1];
+  const to = rest[2];
+  if (!from || !kind || !to) {
+    console.error("usage: zts relate <from> <kind> <to>");
+    console.error("  e.g. zts relate <test> tests <target>");
+    console.error("       zts relate <new> supersedes <old>");
     Deno.exit(1);
   }
   const res = await fetch(`${BASE_URL}/relationships`, {
@@ -1388,11 +1590,10 @@ async function cmdRelate(rest: string[]): Promise<void> {
 
 async function cmdUnrelate(rest: string[]): Promise<void> {
   const from = rest[0];
-  const to = rest[1];
-  const kind = rest[2] ?? "imports";
-  if (!from || !to) {
-    console.error("usage: zts unrelate <from> <to> [kind]");
-    console.error("  kind defaults to 'imports'");
+  const kind = rest[1];
+  const to = rest[2];
+  if (!from || !kind || !to) {
+    console.error("usage: zts unrelate <from> <kind> <to>");
     Deno.exit(1);
   }
   const res = await fetch(`${BASE_URL}/relationships`, {

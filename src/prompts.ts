@@ -33,7 +33,7 @@ as an explicit cap first argument and export a Cap type.
 ## CLI reference
 
 Corpus:
-  zts post -d "desc" [-t <tests>] [-g <goal>] <file>   store atom
+  zts post -d "desc" -t <tests> [-g <goal>] <file>     store atom (tests required)
   zts get <hash>                                         retrieve source
   zts describe <hash> [-d "text"]                        read or update description
   zts list [--recent N] [--goal G] [--broken] [--prop K] list atoms
@@ -46,8 +46,8 @@ Corpus:
 Relationships:
   zts rels [--from H] [--to H] [--kind K]    query relationships
   zts dependents <hash>                      atoms that import this one
-  zts relate <from> <to> [kind]              add relationship
-  zts unrelate <from> <to> [kind]            remove relationship
+  zts relate <from> <kind> <to>              add relationship (e.g. A tests B)
+  zts unrelate <from> <kind> <to>            remove relationship
 
 Testing:
   zts test <hash>                            run applicable tests
@@ -117,12 +117,18 @@ directly (handovers/next.md, notes/current.md, tmp/).
 
 1. If no goal is in progress, run zts goal pick to select one.
    Read the goal details with zts goal show <name>.
-2. Check what already exists: zts search, zts search --code, zts list --goal.
+2. Before writing any atom, write its full description first — what it
+   computes or does, its inputs and outputs, edge cases, and non-obvious
+   behavior. Then search on that full description:
+     zts search "<your full description>"
+   Longer, more detailed queries produce significantly better matches.
+   If a usable match exists, reuse it (check with zts info and zts tops).
+   If not, proceed — you already have the description for -d.
 3. Work the TDD loop:
    - Write test atoms first (they don't import the target)
-   - Post with test gate: zts post -d "desc" -t <test> -g <goal> <file>
+   - Post with tests: zts post -d "desc" -t <test> -g <goal> <file>
    - Build leaves before parents
-4. When you improve on an existing atom: zts relate <new> <old> supersedes
+4. When you improve on an existing atom: zts relate <new> supersedes <old>
 5. Add observations to the goal: zts goal comment <name> "what you learned"
 6. Before finishing, write your handover to handovers/next.md using the
    Write tool (do not read the directory or current.md first — just write):
