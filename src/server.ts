@@ -17,7 +17,7 @@ import {
 } from "./embed.ts";
 import { HnswIndex } from "./hnsw.ts";
 import { minify } from "./minify.ts";
-import { getDefaultPrompt, PROMPT_NAMES, type PromptName } from "./prompts.ts";
+import { getDefaultPrompt, type PromptName } from "./prompts.ts";
 import { validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);

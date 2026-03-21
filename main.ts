@@ -3,6 +3,12 @@ import { parseZip } from "./src/bundle.ts";
 import { minify } from "./src/minify.ts";
 import { MAX_GZIP_BYTES } from "./src/validate.ts";
 import { DATA_DIR, PORT, serve } from "./src/server.ts";
+import {
+  runWorker,
+  setupWorkspace,
+  stopWorker,
+  type WorkerConfig,
+} from "./src/worker.ts";
 
 const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
 
@@ -88,8 +94,24 @@ const args = parseArgs(Deno.args, {
     "weight",
     "body",
     "since",
+    "channel",
+    "workspaces-dir",
+    "max-turns",
+    "max-iters",
+    "model",
+    "context-prompt",
+    "iteration-prompt",
+    "retrospective-prompt",
   ],
-  boolean: ["f", "no-description", "broken", "all", "done"],
+  boolean: [
+    "f",
+    "no-description",
+    "broken",
+    "all",
+    "done",
+    "once",
+    "dangerously-skip-permissions",
+  ],
   alias: {
     d: "description",
     f: "follow",
@@ -232,6 +254,10 @@ switch (command) {
     await cmdShowPrompt(rest);
     break;
 
+  case "worker":
+    await cmdWorker(rest);
+    break;
+
   default:
     console.error(`usage: zts <command> [options]
 
@@ -295,6 +321,11 @@ Status & logs:
   log [--recent N] [--op X] [--subject X]
                                query audit log
   show-prompt <name>           show agent prompt (context/iteration/retrospective)
+
+Agent loop:
+  worker setup                 create workspace for a channel
+  worker [run]                 start the agent loop
+  worker stop                  stop a running worker
 
 Server:
   run                          start server in foreground
@@ -1141,6 +1172,88 @@ async function cmdStatus(): Promise<void> {
         `  ${g.name}  ${g.total} atoms${recentStr}  ${g.commentCount} comments`,
       );
     }
+  }
+}
+
+function workerConfig(): WorkerConfig {
+  const devToken = Deno.env.get("ZTS_DEV_TOKEN");
+  if (!devToken) {
+    console.error(
+      "error: ZTS_DEV_TOKEN is not set. Export it to run the worker.",
+    );
+    Deno.exit(1);
+  }
+  return {
+    channel: args.channel ?? "default",
+    workspacesDir: args["workspaces-dir"] ?? "./workspaces",
+    maxTurns: parseInt(args["max-turns"] ?? "100", 10),
+    maxIters: parseInt(args["max-iters"] ?? "0", 10),
+    once: args.once ?? false,
+    dangerouslySkipPermissions: args["dangerously-skip-permissions"] ?? false,
+    model: args.model,
+    serverUrl: BASE_URL,
+    devToken,
+    contextPromptFile: args["context-prompt"],
+    iterationPromptFile: args["iteration-prompt"],
+    retrospectivePromptFile: args["retrospective-prompt"],
+  };
+}
+
+async function cmdWorker(rest: string[]): Promise<void> {
+  const sub = rest[0];
+  if (sub === "setup") {
+    try {
+      await setupWorkspace(workerConfig());
+    } catch (e) {
+      console.error(`error: ${(e as Error).message}`);
+      Deno.exit(1);
+    }
+  } else if (sub === "stop") {
+    await stopWorker(workerConfig());
+  } else if (!sub || sub === "run") {
+    await runWorker(workerConfig());
+  } else {
+    console.error("usage: zts worker [setup|stop|run]");
+    console.error(
+      "  setup                        create workspace for channel",
+    );
+    console.error(
+      "  stop                         stop running worker on channel",
+    );
+    console.error(
+      "  run (default)                start the agent loop",
+    );
+    console.error("");
+    console.error("flags:");
+    console.error(
+      "  --channel <name>             channel name (default: default)",
+    );
+    console.error(
+      "  --workspaces-dir <path>      workspaces root (default: ./workspaces)",
+    );
+    console.error(
+      "  --max-turns <N>              agent turns per iteration (default: 100)",
+    );
+    console.error(
+      "  --max-iters <N>              max iterations, 0=infinite (default: 0)",
+    );
+    console.error("  --once                       run one iteration then exit");
+    console.error(
+      "  --model <model>              agent model (e.g. sonnet, opus)",
+    );
+    console.error(
+      "  --dangerously-skip-permissions  skip agent permission prompts",
+    );
+    console.error(
+      "  --context-prompt <file>      override context prompt from file",
+    );
+    console.error(
+      "  --iteration-prompt <file>    override iteration prompt from file",
+    );
+    console.error(
+      "  --retrospective-prompt <file>  override retrospective prompt from file",
+    );
+    Deno.exit(1);
   }
 }
 

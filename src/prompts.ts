@@ -107,22 +107,30 @@ A test atom exports a class named Test with a static name and a run(target) meth
 export const DEFAULT_ITERATION = `\
 # Iteration instructions
 
-1. Read your handover from handovers/current.md.
-2. If no goal is in progress, run zts goal pick to select one.
+Your incoming handover (from the previous iteration) is included below in
+this prompt. Do not read handovers/current.md — it is already in your context.
+
+Your working directory is the channel workspace. You can write files here
+directly (handovers/next.md, notes/current.md, tmp/).
+
+## Workflow
+
+1. If no goal is in progress, run zts goal pick to select one.
    Read the goal details with zts goal show <name>.
-3. Check what already exists: zts search, zts search --code, zts list --goal.
-4. Work the TDD loop:
+2. Check what already exists: zts search, zts search --code, zts list --goal.
+3. Work the TDD loop:
    - Write test atoms first (they don't import the target)
    - Post with test gate: zts post -d "desc" -t <test> -g <goal> <file>
    - Build leaves before parents
-5. When you improve on an existing atom: zts relate <new> <old> supersedes
-6. Add observations to the goal: zts goal comment <name> "what you learned"
-7. Before finishing, write your handover to handovers/next.md:
+4. When you improve on an existing atom: zts relate <new> <old> supersedes
+5. Add observations to the goal: zts goal comment <name> "what you learned"
+6. Before finishing, write your handover to handovers/next.md using the
+   Write tool (do not read the directory or current.md first — just write):
    - Goal in progress and current state
    - Atoms built this iteration (hash + description)
    - Needs stack (what remains to build, deepest first)
    - Notes and warnings for the next iteration
-8. If a goal is complete, run zts goal done <name> with a comment explaining
+7. If a goal is complete, run zts goal done <name> with a comment explaining
    what was achieved and how to verify.
 
 Keep your handover concise — the next agent reads it to pick up where you left off.
@@ -135,27 +143,31 @@ export const DEFAULT_RETROSPECTIVE = `\
 This is a retrospective iteration. Instead of building atoms, reflect on the
 last 30 iterations.
 
-1. Read the recent handovers in handovers/history/ (last 30).
-2. Read the most recent retrospectives in retrospectives/ for continuity.
-3. Write a retrospective to retrospectives/retro-NNNN.md covering:
+The recent handover history and any previous retrospectives are included below
+in this prompt. Do not read handover or retrospective files from disk — that
+content is already in your context. You may use zts CLI commands (status, list,
+search, goal show, etc.) if you want additional context.
 
-   ## Wins
-   The most significant atoms, goals, or capabilities added. What compounded?
-   What unlocked further work?
+Write a retrospective file to the path specified below (retrospectives/retro-NNNN.md).
+The retrospective should cover:
 
-   ## Friction
-   Recurring problems, tooling gaps, workflow pain points. What slowed you down
-   or caused rework? Be specific — name the commands, error messages, or
-   patterns that caused trouble.
+## Wins
+The most significant atoms, goals, or capabilities added. What compounded?
+What unlocked further work?
 
-   ## Suggestions
-   Concrete improvements to zts (CLI, server, validation, search) or to the
-   agent workflow (handover format, goal structure, testing patterns). Prioritize
-   by impact.
+## Friction
+Recurring problems, tooling gaps, workflow pain points. What slowed you down
+or caused rework? Be specific — name the commands, error messages, or
+patterns that caused trouble.
 
-   ## Observations
-   Anything else worth noting: patterns in the corpus, surprising discoveries,
-   quality trends, or meta-observations about the process.
+## Suggestions
+Concrete improvements to zts (CLI, server, validation, search) or to the
+agent workflow (handover format, goal structure, testing patterns). Prioritize
+by impact.
+
+## Observations
+Anything else worth noting: patterns in the corpus, surprising discoveries,
+quality trends, or meta-observations about the process.
 
 Be terse and precise. This is written for the operator and for future agents.
 Do not build atoms in this iteration.
