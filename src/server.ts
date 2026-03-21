@@ -1270,7 +1270,7 @@ async function route(req: Request): Promise<Response> {
       if (!last || !last.body.startsWith("DONE: ")) {
         return new Response(
           'Cannot mark done: the last comment must start with "DONE: " summarising how it was ' +
-            'done and what exists that satisfies the goal. ' +
+            "done and what exists that satisfies the goal. " +
             "Include concrete `zts exec <hash>` commands to demonstrate the result, if appropriate.",
           { status: 422 },
         );
