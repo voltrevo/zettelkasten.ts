@@ -979,9 +979,10 @@ export class Db {
   }
 
   deleteGoalComment(id: number): boolean {
-    const result = this.db.prepare("DELETE FROM goal_comments WHERE id = ?").run(
-      id,
-    );
+    const result = this.db.prepare("DELETE FROM goal_comments WHERE id = ?")
+      .run(
+        id,
+      );
     return result > 0;
   }
 

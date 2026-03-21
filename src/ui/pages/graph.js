@@ -13,14 +13,16 @@ registerPage("graph", async () => {
     h("option", { value: "" }, "all"),
   );
   const sizeSelect = h("select");
-  for (const [val, label] of [
-    ["200", "200 atoms"],
-    ["500", "500 atoms"],
-    ["1000", "1000 atoms"],
-    ["2000", "2000 atoms"],
-    ["custom", "custom..."],
-    ["all", "all"],
-  ]) {
+  for (
+    const [val, label] of [
+      ["200", "200 atoms"],
+      ["500", "500 atoms"],
+      ["1000", "1000 atoms"],
+      ["2000", "2000 atoms"],
+      ["custom", "custom..."],
+      ["all", "all"],
+    ]
+  ) {
     sizeSelect.append(h("option", { value: val }, label));
   }
   const customInput = h("input", {
@@ -31,7 +33,11 @@ registerPage("graph", async () => {
   });
   const labelStyle =
     "font-size:0.8rem;color:var(--text-2);display:flex;align-items:center;gap:0.5rem";
-  const generateBtn = h("button", { class: "btn btn-sm btn-primary" }, "Generate");
+  const generateBtn = h(
+    "button",
+    { class: "btn btn-sm btn-primary" },
+    "Generate",
+  );
   controls.append(
     h("label", { style: labelStyle }, "Relationship:", kindSelect),
     h("label", { style: labelStyle }, "Size:", sizeSelect, customInput),

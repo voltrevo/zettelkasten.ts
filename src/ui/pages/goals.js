@@ -1,4 +1,12 @@
-import { api, apiJson, h, navigate, registerPage, relTime, shortHash } from "../app.js";
+import {
+  api,
+  apiJson,
+  h,
+  navigate,
+  registerPage,
+  relTime,
+  shortHash,
+} from "../app.js";
 
 registerPage("goals", async (args) => {
   // If subpath, show goal detail
@@ -119,29 +127,74 @@ async function goalDetail(name) {
     style: "display:flex;align-items:baseline;gap:0.75rem;margin-bottom:1rem",
   });
   header.append(h("h1", { class: "page-title", style: "margin:0" }, name));
-  header.append(
-    h("span", { class: "badge badge-blue" }, `weight: ${goal.weight ?? 1}`),
-  );
   if (goal.done) {
-    header.append(
-      h(
-        "span",
-        { class: "badge badge-green" },
-        "done",
-      ),
-    );
+    header.append(h("span", { class: "badge badge-green" }, "done"));
   }
   root.append(header);
 
-  if (goal.body) {
-    root.append(
-      h("div", {
-        class: "card",
-        style:
-          "white-space:pre-wrap;font-size:0.875rem;color:var(--text-1);margin-bottom:1rem",
-      }, goal.body),
-    );
-  }
+  // Editable fields
+  const editSection = h("div", { class: "card", style: "margin-bottom:1rem" });
+
+  const weightRow = h("div", {
+    style: "display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem",
+  });
+  weightRow.append(
+    h(
+      "label",
+      { style: "font-size:0.8rem;color:var(--text-2);width:4rem" },
+      "Weight",
+    ),
+  );
+  const weightInput = h("input", {
+    type: "number",
+    value: String(goal.weight ?? 1),
+    min: "0",
+    style: "width:5rem",
+  });
+  weightRow.append(weightInput);
+  editSection.append(weightRow);
+
+  const bodyRow = h("div", { style: "margin-bottom:0.75rem" });
+  bodyRow.append(
+    h("label", {
+      style:
+        "display:block;font-size:0.8rem;color:var(--text-2);margin-bottom:0.375rem",
+    }, "Body"),
+  );
+  const bodyInput = h("textarea", {
+    style:
+      "width:100%;min-height:6rem;font-family:var(--mono);font-size:0.8rem",
+    placeholder: "Goal description...",
+  });
+  bodyInput.value = goal.body ?? "";
+  bodyRow.append(bodyInput);
+  editSection.append(bodyRow);
+
+  const editActions = h("div", {
+    style: "display:flex;gap:0.5rem;align-items:center",
+  });
+  const saveBtn = h("button", { class: "btn btn-sm btn-primary" }, "Save");
+  const editStatus = h("span", { style: "font-size:0.8rem" });
+  saveBtn.addEventListener("click", async () => {
+    const res = await api(`/goals/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        weight: parseInt(weightInput.value, 10) || 1,
+        body: bodyInput.value,
+      }),
+    });
+    if (res.ok) {
+      editStatus.textContent = "Saved";
+      editStatus.style.color = "var(--green)";
+      setTimeout(() => editStatus.textContent = "", 2000);
+    } else {
+      editStatus.textContent = await res.text();
+      editStatus.style.color = "var(--red)";
+    }
+  });
+  editActions.append(saveBtn, editStatus);
+  editSection.append(editActions);
+  root.append(editSection);
 
   // Actions
   const actions = h("div", {
@@ -186,7 +239,25 @@ async function goalDetail(name) {
     });
     actions.append(undoneBtn);
   }
-  actions.append(actionStatus);
+
+  const deleteBtn = h(
+    "button",
+    { class: "btn btn-sm btn-danger" },
+    "Delete Goal",
+  );
+  deleteBtn.addEventListener("click", async () => {
+    if (!confirm(`Delete goal "${name}"? This cannot be undone.`)) return;
+    const res = await api(`/goals/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      location.hash = "#/goals";
+    } else {
+      actionStatus.textContent = await res.text();
+      actionStatus.style.color = "var(--red)";
+    }
+  });
+  actions.append(deleteBtn, actionStatus);
   root.append(actions);
 
   // Atoms contributing to this goal

@@ -574,7 +574,10 @@ async function route(req: Request): Promise<Response> {
         });
       } catch (e) {
         console.error("[search] FTS error:", e);
-        return new Response(`Search error: ${e instanceof Error ? e.message : e}`, { status: 400 });
+        return new Response(
+          `Search error: ${e instanceof Error ? e.message : e}`,
+          { status: 400 },
+        );
       }
     }
 
@@ -1258,10 +1261,24 @@ async function route(req: Request): Promise<Response> {
     if (doneMatch) {
       const authErr = requireAuth(req, "dev");
       if (authErr) return authErr;
-      if (!db.markGoalDone(doneMatch[1])) {
+      const goalName = doneMatch[1];
+      if (!db.goalExists(goalName)) {
         return new Response("Goal not found", { status: 404 });
       }
-      db.insertLog({ op: "goal.done", subject: doneMatch[1] });
+      const comments = db.getGoalComments(goalName);
+      const last = comments[comments.length - 1];
+      if (!last || !last.body.startsWith("DONE: ")) {
+        return new Response(
+          'Cannot mark done: the last comment must start with "DONE: " summarising how it was ' +
+            'done and what exists that satisfies the goal. ' +
+            "Include concrete `zts exec <hash>` commands to demonstrate the result, if appropriate.",
+          { status: 422 },
+        );
+      }
+      if (!db.markGoalDone(goalName)) {
+        return new Response("Goal not found", { status: 404 });
+      }
+      db.insertLog({ op: "goal.done", subject: goalName });
       return new Response("ok\n", {
         headers: { "content-type": "text/plain" },
       });

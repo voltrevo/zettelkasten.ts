@@ -122,6 +122,7 @@ async function init() {
       import("./pages/atom.js"),
       import("./pages/search.js"),
       import("./pages/graph.js"),
+      import("./pages/starred.js"),
       import("./pages/goals.js"),
       import("./pages/log.js"),
       import("./pages/prompts.js"),

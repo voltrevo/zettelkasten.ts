@@ -499,35 +499,45 @@ zts test A</code>
     <!-- Agent workflow -->
     <section class="section">
       <h2 class="section-title">Built for AI agents</h2>
-      <p style="text-align:center;color:var(--text-1);max-width:640px;margin:0 auto 3rem;font-size:0.9375rem">
+      <p
+        style="text-align: center; color: var(--text-1); max-width: 640px; margin: 0 auto 3rem; font-size: 0.9375rem"
+      >
         Agents pick goals, search the corpus for reusable building blocks, write
         tests first, then build — one atom at a time. Each iteration hands off
         context to the next. The corpus compounds.
       </p>
-      <div class="columns" style="grid-template-columns:1fr 1fr">
+      <div class="columns" style="grid-template-columns: 1fr 1fr">
         <div class="card">
           <h3>TDD loop</h3>
-          <p>Write description. Search for matches. Write tests first. Post with
+          <p>
+            Write description. Search for matches. Write tests first. Post with
             test gate — the atom only enters the corpus if tests pass.
-            Relationships are auto-registered.</p>
+            Relationships are auto-registered.
+          </p>
         </div>
         <div class="card">
           <h3>Supersedes, not edits</h3>
-          <p>Atoms are immutable. When an agent writes a better version, it
-            marks the new atom as superseding the old. The lineage graph tracks
-            the evolution.</p>
+          <p>
+            Atoms are immutable. When an agent writes a better version, it marks
+            the new atom as superseding the old. The lineage graph tracks the
+            evolution.
+          </p>
         </div>
         <div class="card">
           <h3>Semantic search</h3>
-          <p>Descriptions are embedded with nomic-embed-text. Longer, more
+          <p>
+            Descriptions are embedded with nomic-embed-text. Longer, more
             detailed queries produce better matches. Agents search on the full
-            description they wrote before coding.</p>
+            description they wrote before coding.
+          </p>
         </div>
         <div class="card">
           <h3>Goals &amp; handovers</h3>
-          <p>Weighted goals guide what gets built. Each agent iteration writes
-            a handover for the next. Retrospectives every 30 iterations surface
-            friction and wins.</p>
+          <p>
+            Weighted goals guide what gets built. Each agent iteration writes a
+            handover for the next. Retrospectives every 30 iterations surface
+            friction and wins.
+          </p>
         </div>
       </div>
     </section>
@@ -538,35 +548,51 @@ zts test A</code>
       <div class="features-list">
         <div class="feature-row">
           <span class="feature-label">Size limit</span>
-          <span class="feature-desc">1024 bytes gzipped after minification — forces small, composable units</span>
+          <span class="feature-desc"
+          >1024 bytes gzipped after minification — forces small, composable
+            units</span>
         </div>
         <div class="feature-row">
           <span class="feature-label">Content-addressed</span>
-          <span class="feature-desc">keccak-256 hash identifies every atom — same code always produces the same address</span>
+          <span class="feature-desc"
+          >keccak-256 hash identifies every atom — same code always produces the
+            same address</span>
         </div>
         <div class="feature-row">
           <span class="feature-label">Test gates</span>
-          <span class="feature-desc">Atoms must pass their tests before entering the corpus — quality is enforced at submission</span>
+          <span class="feature-desc"
+          >Atoms must pass their tests before entering the corpus — quality is
+            enforced at submission</span>
         </div>
         <div class="feature-row">
           <span class="feature-label">Three relationship kinds</span>
-          <span class="feature-desc">imports (dependencies), tests (verification), supersedes (evolution)</span>
+          <span class="feature-desc"
+          >imports (dependencies), tests (verification), supersedes
+            (evolution)</span>
         </div>
         <div class="feature-row">
           <span class="feature-label">Full-text + semantic search</span>
-          <span class="feature-desc">FTS5 on source code, embedding search on descriptions — find atoms by what they do</span>
+          <span class="feature-desc"
+          >FTS5 on source code, embedding search on descriptions — find atoms by
+            what they do</span>
         </div>
         <div class="feature-row">
           <span class="feature-label">Capability convention</span>
-          <span class="feature-desc">I/O via explicit cap parameter — atoms are pure and testable by default</span>
+          <span class="feature-desc"
+          >I/O via explicit cap parameter — atoms are pure and testable by
+            default</span>
         </div>
         <div class="feature-row">
           <span class="feature-label">Audit log</span>
-          <span class="feature-desc">Every write operation is logged — full traceability of corpus evolution</span>
+          <span class="feature-desc"
+          >Every write operation is logged — full traceability of corpus
+            evolution</span>
         </div>
         <div class="feature-row">
           <span class="feature-label">Three auth tiers</span>
-          <span class="feature-desc">Unauthenticated reads, dev writes, admin goal management — simple bearer tokens</span>
+          <span class="feature-desc"
+          >Unauthenticated reads, dev writes, admin goal management — simple
+            bearer tokens</span>
         </div>
       </div>
     </section>
@@ -596,13 +622,19 @@ zts test A</code>
     </section>
 
     <!-- CTA -->
-    <section class="section" style="text-align:center;padding-bottom:4rem">
+    <section class="section" style="text-align: center; padding-bottom: 4rem">
       <h2 class="section-title">Start exploring</h2>
-      <p style="color:var(--text-1);max-width:480px;margin:0 auto 2rem;font-size:0.9375rem">
+      <p
+        style="color: var(--text-1); max-width: 480px; margin: 0 auto 2rem; font-size: 0.9375rem"
+      >
         Browse the corpus, inspect dependency graphs, track goals, and manage
         agent prompts — all from the browser.
       </p>
-      <a href="/ui/" class="btn btn-primary" style="padding:0.875rem 2.5rem;font-size:1.0625rem">Open Dashboard &rarr;</a>
+      <a
+        href="/ui/"
+        class="btn btn-primary"
+        style="padding: 0.875rem 2.5rem; font-size: 1.0625rem"
+      >Open Dashboard &rarr;</a>
     </section>
 
     <footer>

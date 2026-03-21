@@ -128,18 +128,24 @@ registerPage("prompts", async () => {
     const lcs = lcsLines(aLines, bLines);
     let ai = 0, bi = 0, li = 0;
     while (ai < aLines.length || bi < bLines.length) {
-      if (li < lcs.length && ai < aLines.length && bi < bLines.length &&
-        aLines[ai] === lcs[li] && bLines[bi] === lcs[li]) {
+      if (
+        li < lcs.length && ai < aLines.length && bi < bLines.length &&
+        aLines[ai] === lcs[li] && bLines[bi] === lcs[li]
+      ) {
         frag.append(diffLine(" ", aLines[ai]));
         ai++;
         bi++;
         li++;
-      } else if (ai < aLines.length &&
-        (li >= lcs.length || aLines[ai] !== lcs[li])) {
+      } else if (
+        ai < aLines.length &&
+        (li >= lcs.length || aLines[ai] !== lcs[li])
+      ) {
         frag.append(diffLine("-", aLines[ai]));
         ai++;
-      } else if (bi < bLines.length &&
-        (li >= lcs.length || bLines[bi] !== lcs[li])) {
+      } else if (
+        bi < bLines.length &&
+        (li >= lcs.length || bLines[bi] !== lcs[li])
+      ) {
         frag.append(diffLine("+", bLines[bi]));
         bi++;
       }

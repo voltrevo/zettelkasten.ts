@@ -44,6 +44,29 @@ registerPage("atom", async (args) => {
   if (info.description?.startsWith("BROKEN:")) {
     header.append(h("span", { class: "badge badge-red" }, "BROKEN"));
   }
+  let starred = (info.properties ?? []).some((p) => p.key === "starred");
+  const starBtn = h("button", {
+    class: "btn btn-sm btn-ghost",
+    style: "font-size:1.2rem;padding:0.1rem 0.5rem;line-height:1",
+    title: starred ? "Unstar" : "Star",
+  }, starred ? "\u2605" : "\u2606");
+  starBtn.addEventListener("click", async () => {
+    const res = starred
+      ? await api("/properties", {
+        method: "DELETE",
+        body: JSON.stringify({ hash: info.hash, key: "starred" }),
+      })
+      : await api("/properties", {
+        method: "POST",
+        body: JSON.stringify({ hash: info.hash, key: "starred", value: "1" }),
+      });
+    if (res.ok) {
+      starred = !starred;
+      starBtn.textContent = starred ? "\u2605" : "\u2606";
+      starBtn.title = starred ? "Unstar" : "Star";
+    }
+  });
+  header.append(starBtn);
 
   const meta = h("div", {
     style:
@@ -163,7 +186,10 @@ registerPage("atom", async (args) => {
     return section;
   }
 
-  const importedByBox = h("div", { class: "card", style: "margin-bottom:1rem" });
+  const importedByBox = h("div", {
+    class: "card",
+    style: "margin-bottom:1rem",
+  });
   importedByBox.append(hashList("Imported By", info.importedBy));
   root.append(importedByBox);
 

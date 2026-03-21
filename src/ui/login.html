@@ -26,28 +26,32 @@
     </div>
 
     <script>
-      document.getElementById("login-form").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const errEl = document.getElementById("login-error");
-        const token = document.getElementById("login-token").value.trim();
-        if (!token) return;
-        errEl.textContent = "";
-        try {
-          const res = await fetch("/ui/login", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ token }),
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            errEl.textContent = data.error || "Invalid token";
-            return;
+      document.getElementById("login-form").addEventListener(
+        "submit",
+        async (e) => {
+          e.preventDefault();
+          const errEl = document.getElementById("login-error");
+          const token = document.getElementById("login-token").value
+            .trim();
+          if (!token) return;
+          errEl.textContent = "";
+          try {
+            const res = await fetch("/ui/login", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ token }),
+            });
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              errEl.textContent = data.error || "Invalid token";
+              return;
+            }
+            location.href = "/ui/";
+          } catch {
+            errEl.textContent = "Could not connect to server";
           }
-          location.href = "/ui/";
-        } catch {
-          errEl.textContent = "Could not connect to server";
-        }
-      });
+        },
+      );
     </script>
   </body>
 </html>
