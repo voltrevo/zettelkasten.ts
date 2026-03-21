@@ -152,6 +152,19 @@ status endpoint the loop runner exposes). If the agent runs in a separate
 container, the server would need a lightweight status API from the agent — or
 the loop runner could POST iteration summaries to the server's log table.
 
+### Prompts (`/ui/prompts`)
+
+Admin-only page for editing agent prompts (context, iteration,
+retrospective).
+
+- Shows the active prompt (DB override if exists, compiled default
+  otherwise)
+- Edit inline with a text area, save to `prompts` table
+- "Show default" button reveals the compiled-in default for comparison,
+  even when an override is active
+- "Reset to default" removes the DB override
+- Changes take effect on the next agent iteration (no restart needed)
+
 ### Audit log (`/ui/log`)
 
 Paginated, filterable view of the `log` table:
@@ -226,6 +239,7 @@ GET /ui/search              search
 GET /ui/goals               goal list
 GET /ui/goals/<name>        goal detail
 GET /ui/agents              agent monitor
+GET /ui/prompts             prompt editor (admin)
 GET /ui/log                 audit log
 ```
 

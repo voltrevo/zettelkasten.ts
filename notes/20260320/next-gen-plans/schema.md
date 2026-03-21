@@ -237,3 +237,18 @@ Checked on server startup. If the DB version is ahead of the server, fail with a
 clear error ("database is schema version N, server supports up to M — upgrade
 the server"). If behind, run migrations forward. Single row, never deleted —
 only updated.
+
+### prompts
+
+```sql
+CREATE TABLE IF NOT EXISTS prompts (
+  name       TEXT PRIMARY KEY,   -- 'context', 'iteration', 'retrospective'
+  body       TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+Admin-editable prompt overrides. Empty table = use compiled defaults from
+`src/prompts.ts`. Row exists = override. `zts show-prompt` and the worker
+check DB first, fall back to compiled default. Web UI shows both active
+and default when an override exists.

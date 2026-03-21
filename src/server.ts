@@ -17,6 +17,7 @@ import {
 } from "./embed.ts";
 import { HnswIndex } from "./hnsw.ts";
 import { minify } from "./minify.ts";
+import { getDefaultPrompt, PROMPT_NAMES, type PromptName } from "./prompts.ts";
 import { validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
@@ -985,6 +986,31 @@ async function route(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ ...status, since }), {
       headers: { "content-type": "application/json" },
     });
+  }
+
+  // GET /prompts/<name> — get active prompt (override or default)
+  // GET /prompts/<name>?default=1 — get compiled default
+  if (req.method === "GET") {
+    const promptMatch = path.match(
+      /^\/prompts\/(context|iteration|retrospective)$/,
+    );
+    if (promptMatch) {
+      const name = promptMatch[1] as PromptName;
+      const wantDefault = url.searchParams.get("default") === "1";
+      if (wantDefault) {
+        return new Response(getDefaultPrompt(name), {
+          headers: { "content-type": "text/plain" },
+        });
+      }
+      const override = db.getPromptOverride(name);
+      const body = override ?? getDefaultPrompt(name);
+      return new Response(body, {
+        headers: {
+          "content-type": "text/plain",
+          "x-prompt-source": override ? "override" : "default",
+        },
+      });
+    }
   }
 
   // --- Goals ---

@@ -1,6 +1,6 @@
 import { Database } from "@db/sqlite";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -90,6 +90,12 @@ END;
 CREATE TRIGGER IF NOT EXISTS atoms_fts_delete AFTER DELETE ON atoms BEGIN
   INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
 END;
+
+CREATE TABLE IF NOT EXISTS prompts (
+  name       TEXT PRIMARY KEY,
+  body       TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS log (
   id         INTEGER PRIMARY KEY,
@@ -236,6 +242,18 @@ export class Db {
       this.db.exec("PRAGMA foreign_keys=ON");
       this.db.prepare("UPDATE schema_version SET version = ?").run(2);
       console.log("Schema v2 migration complete.");
+    }
+    if (fromVersion < 3) {
+      // v2→v3: add prompts table
+      console.log("Migrating schema v2 → v3...");
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS prompts (
+          name TEXT PRIMARY KEY, body TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      this.db.prepare("UPDATE schema_version SET version = ?").run(3);
+      console.log("Schema v3 migration complete.");
     }
   }
 
@@ -955,6 +973,28 @@ export class Db {
       "SELECT 1 FROM goals WHERE name = ?",
     ).get<{ "1": number }>(name);
     return row !== undefined;
+  }
+
+  // --- Prompts ---
+
+  getPromptOverride(name: string): string | null {
+    const row = this.db.prepare(
+      "SELECT body FROM prompts WHERE name = ?",
+    ).get<{ body: string }>(name);
+    return row?.body ?? null;
+  }
+
+  setPromptOverride(name: string, body: string): void {
+    this.db.prepare(
+      "INSERT OR REPLACE INTO prompts (name, body, updated_at) VALUES (?, ?, datetime('now'))",
+    ).run(name, body);
+  }
+
+  deletePromptOverride(name: string): boolean {
+    const changes = this.db.prepare(
+      "DELETE FROM prompts WHERE name = ?",
+    ).run(name);
+    return changes > 0;
   }
 
   // --- Status ---

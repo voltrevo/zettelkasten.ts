@@ -150,13 +150,13 @@ HTTP to zts-server. Receives `ZTS_DEV_TOKEN` only (never admin).
 
 Outbound: zts-server + Anthropic API (via gateway). Nothing else.
 
-Entrypoint reads `ZTS_CHANNELS`, spawns one `zts script worker` per channel in
+Entrypoint reads `ZTS_CHANNELS`, spawns one `zts worker` per channel in
 parallel:
 
 ```sh
 IFS=',' read -ra CHANNELS <<< "${ZTS_CHANNELS:-default}"
 for channel in "${CHANNELS[@]}"; do
-  zts script worker --channel "$channel" | bash &
+  zts worker --channel "$channel" &
 done
 wait
 ```
@@ -271,42 +271,50 @@ correctly. The CLI waits for exit and forwards the exit code.
 Emits a shell script to stdout. The operator pipes it to bash:
 
 ```sh
-zts script worker --channel bricklane | bash
-zts script worker --channel bricklane --max-turns 80 | bash
-zts script worker --once | bash   # single iteration
+zts worker --channel bricklane
+zts worker --channel bricklane --max-turns 80
+zts worker --once   # single iteration
 ```
 
-The emitted script:
+The worker runs the loop directly in Deno — no shell scripts. It spawns
+`claude` as a subprocess with `-p` for each iteration.
 
-1. Resolves data dir, creates channel directories
-2. Initializes `handovers/current.md` if first run
-3. Enters iteration loop:
-   - Snapshots `current.md`, removes `next.md`
-   - Invokes `claude` with `zts script context` + `zts script iteration`
-   - After exit: promotes `next.md` to `current.md` (or warns if absent)
-   - Backs off 30s on non-zero exit
+### Prompts
 
-### `zts script context` / `zts script iteration`
+Three prompts ship as compiled defaults in `src/prompts.ts`:
 
-Emit prompt fragments. Ship with the tool — no loose files to maintain.
+- **context** — what zts is, atom rules, CLI reference, conventions
+- **iteration** — read handover, pick goal, build, write handover
+- **retrospective** — review last 30 iterations, reflect, suggest
+
+Prompts are passed via `claude -p`, not CLAUDE.md. More explicit,
+self-contained, no risk of accidental edits. Admin can view and override
+prompts via the web UI (stored in `prompts` table, overrides defaults).
 
 ```sh
-# Inspect:
-zts script context
-zts script iteration
-
-# Customize:
-zts script context > my-context.md && $EDITOR my-context.md
+zts show-prompt context        # inspect active context prompt
+zts show-prompt iteration      # inspect active iteration prompt
+zts show-prompt retrospective  # inspect active retrospective prompt
 ```
 
-### `zts script setup`
+### Retrospectives
+
+Every 30 iterations, the worker uses the retrospective prompt instead of
+the iteration prompt. The agent reviews recent handovers, highlights wins,
+identifies friction, suggests improvements. Output saved to
+`workspace/retrospectives/retro-NNNN.md`. Last 2-3 retrospectives are
+included as context for continuity. Retrospectives are informational —
+admin decides what changes.
+
+### `zts worker setup`
 
 Initializes a workspace directory:
 
 ```
 workspace/
-  notes/current.md        -- rolling focus, orientation
   handovers/current.md    -- seeded with first-run content
+  notes/current.md        -- rolling focus, orientation
+  retrospectives/
   logs/
   tmp/
 ```

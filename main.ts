@@ -6,6 +6,33 @@ import { DATA_DIR, PORT, serve } from "./src/server.ts";
 
 const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
 
+function checkServerEnv(): void {
+  const missing: string[] = [];
+  if (!Deno.env.get("ZTS_DEV_TOKEN")) missing.push("ZTS_DEV_TOKEN");
+  if (!Deno.env.get("ZTS_ADMIN_TOKEN")) missing.push("ZTS_ADMIN_TOKEN");
+  if (missing.length > 0) {
+    console.error(
+      `error: required environment variables not set: ${missing.join(", ")}`,
+    );
+    console.error(
+      "Set them in your environment or in " + ENV_FILE,
+    );
+    Deno.exit(1);
+  }
+}
+
+async function writeEnvFile(): Promise<void> {
+  const lines: string[] = [];
+  const devToken = Deno.env.get("ZTS_DEV_TOKEN");
+  const adminToken = Deno.env.get("ZTS_ADMIN_TOKEN");
+  if (devToken) lines.push(`ZTS_DEV_TOKEN=${devToken}`);
+  if (adminToken) lines.push(`ZTS_ADMIN_TOKEN=${adminToken}`);
+  if (lines.length > 0) {
+    await Deno.mkdir(DATA_DIR, { recursive: true });
+    await Deno.writeTextFile(ENV_FILE, lines.join("\n") + "\n");
+  }
+}
+
 function devHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = Deno.env.get("ZTS_DEV_TOKEN");
   if (!token) {
@@ -33,6 +60,7 @@ const LOGROTATE_UNIT = "zts-logrotate";
 const UNIT_DIR = `${Deno.env.get("HOME")}/.config/systemd/user`;
 const UNIT_FILE = `${UNIT_DIR}/${UNIT_NAME}.service`;
 const LOG_FILE = `${DATA_DIR}/server.log`;
+const ENV_FILE = `${DATA_DIR}/env`;
 const LOGROTATE_CONF = `${DATA_DIR}/logrotate.conf`;
 const LOGROTATE_STATE = `${DATA_DIR}/logrotate.status`;
 
@@ -77,10 +105,13 @@ const [command, ...rest] = args._ as string[];
 
 switch (command) {
   case "run":
+    checkServerEnv();
     await serve();
     break;
 
   case "start":
+    checkServerEnv();
+    await writeEnvFile();
     await daemonStart();
     break;
 
@@ -197,104 +228,83 @@ switch (command) {
     await cmdStatus();
     break;
 
+  case "show-prompt":
+    await cmdShowPrompt(rest);
+    break;
+
   default:
-    console.error("usage: zts <command> [options]");
-    console.error("  run                          run server in foreground");
-    console.error(
-      "  start                        install and start daemon (enable on boot)",
-    );
-    console.error(
-      "  stop                         stop daemon and disable on boot",
-    );
-    console.error("  restart                      restart the daemon");
-    console.error("  server-log [-f] [-n <lines>] show server process log");
-    console.error(
-      "  log [--recent N] [--op X] [--subject X]  query audit log",
-    );
-    console.error(
-      "  runs <hash> [--recent N]     test run history for an atom",
-    );
-    console.error(
-      "  get <path|hash>              retrieve code by content address",
-    );
-    console.error(
-      "  post -d <desc> [-t <tests>] [file]  store code, optionally gated on tests",
-    );
-    console.error(
-      "  exec <hash|file.zip>         execute root atom's main(globalThis)",
-    );
-    console.error(
-      "  bundle <hash> [-o <dir>]     download zip bundle (or extract to dir)",
-    );
-    console.error(
-      "  describe <hash> [-d <text>]  set or read description for an atom",
-    );
-    console.error(
-      "  search <query> [-k <n>]      semantic search (default k=10)",
-    );
-    console.error(
-      "  search --code <query> [-k <n>]  FTS5 source code search",
-    );
-    console.error(
-      "  test <hash>                  run all registered tests for an atom",
-    );
-    console.error(
-      "  delete <hash>                delete an orphan atom (no relationships)",
-    );
-    console.error(
-      "  list [--recent N] [--goal G] [--broken]  list atoms",
-    );
-    console.error(
-      "  info <hash>                  full atom info (source, rels, tests)",
-    );
-    console.error(
-      "  size <file>                  estimate gzip size (client-side)",
-    );
-    console.error(
-      "  rels [--from H] [--to H] [--kind K]  query relationships",
-    );
-    console.error(
-      "  dependents <hash>            atoms that import this one",
-    );
-    console.error(
-      "  relate <from> <to> [kind]    add a relationship (default: imports)",
-    );
-    console.error(
-      "  unrelate <from> <to> [kind]  remove a relationship (default: imports)",
-    );
-    console.error(
-      "  prop set <hash> <key> [val]  set a property on an atom",
-    );
-    console.error(
-      "  prop unset <hash> <key>      remove a property",
-    );
-    console.error(
-      "  prop list <hash>             list all properties on an atom",
-    );
-    console.error(
-      "  violates_intent <test> <atom>  mark correctness defect",
-    );
-    console.error(
-      "  falls_short <test> <atom>    mark quality gap",
-    );
-    console.error(
-      "  eval show <test> <target>    read evaluation metadata",
-    );
-    console.error(
-      "  eval set <test> <target> ... set expected outcome + commentary",
-    );
-    console.error(
-      "  tops <hash> [--limit N] [--all]  navigate supersedes graph to best",
-    );
-    console.error(
-      "  goal pick|show|list|done|undone|comment|comments  goal commands",
-    );
-    console.error(
-      "  admin goal add|set|delete        admin goal management",
-    );
-    console.error(
-      "  status [--since YYYY-MM-DD]  corpus health summary",
-    );
+    console.error(`usage: zts <command> [options]
+
+Corpus:
+  post -d <desc> [-t <tests>] [-g <goal>] <file>
+                               store atom
+  get <hash>                   retrieve source
+  delete <hash>                delete orphan atom
+  list [--recent N] [--goal G] [--broken] [--prop K]
+                               list atoms
+  info <hash>                  source, description, relationships, properties
+  describe <hash> [-d <text>]  read or update description
+  search <query> [-k N]        semantic search on descriptions
+  search --code <query> [-k N] full-text search on source
+  size <file>                  estimate gzip size (client-side)
+  exec <hash|file.zip> [args]  run atom's main(globalThis)
+  bundle <hash> [-o <dir>]     download or extract zip bundle
+
+Relationships:
+  rels [--from H] [--to H] [--kind K]
+                               query relationships
+  dependents <hash>            atoms that import this one
+  relate <from> <to> [kind]    add relationship (default: imports)
+  unrelate <from> <to> [kind]  remove relationship
+  tops <hash> [--limit N] [--all]
+                               navigate supersedes graph to best
+
+Testing:
+  test <hash>                  run applicable tests
+  violates_intent <test> <atom>  mark correctness defect
+  falls_short <test> <atom>    mark quality gap
+  eval show <test> <target>    read evaluation metadata
+  eval set <test> <target> --expected <outcome> [--commentary <text>]
+                               set evaluation metadata
+  runs <hash> [--recent N]     test run history
+
+Properties:
+  prop set <hash> <key> [val]  set a property
+  prop unset <hash> <key>      remove a property
+  prop list <hash>             list properties on an atom
+
+Goals:
+  goal pick [--n N]            weighted random sample
+  goal show <name>             body + comments
+  goal list [--done] [--all]   list goals
+  goal done <name>             mark complete
+  goal undone <name>           revert
+  goal comment <name> <text>   append observation
+  goal comments <name> [--recent N]
+                               read observations
+
+Admin:
+  admin goal add <name> [--weight N] [--body <text>]
+                               create goal
+  admin goal set <name> [--weight N] [--body <text>]
+                               update goal
+  admin goal delete <name>     delete goal
+
+Status & logs:
+  status [--since YYYY-MM-DD]  corpus health summary
+  log [--recent N] [--op X] [--subject X]
+                               query audit log
+  show-prompt <name>           show agent prompt (context/iteration/retrospective)
+
+Server:
+  run                          start server in foreground
+  start                        install + start daemon
+  stop                         stop + disable daemon
+  restart                      restart daemon
+  server-log [-f] [-n <lines>] show server process log
+
+Hash prefixes work everywhere (e.g. zts info 3ax9).
+Use <command> -h for detailed help on a specific command.`);
     Deno.exit(command ? 1 : 0);
 }
 
@@ -319,6 +329,7 @@ async function daemonInstall(): Promise<void> {
     "",
     "[Service]",
     `WorkingDirectory=${projectDir}`,
+    `EnvironmentFile=${ENV_FILE}`,
     `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=${denoExec} --allow-ffi ${scriptPath} run`,
     `StandardOutput=append:${LOG_FILE}`,
     `StandardError=append:${LOG_FILE}`,
@@ -1131,6 +1142,28 @@ async function cmdStatus(): Promise<void> {
       );
     }
   }
+}
+
+async function cmdShowPrompt(rest: string[]): Promise<void> {
+  const name = rest[0];
+  if (!name || !["context", "iteration", "retrospective"].includes(name)) {
+    console.error(
+      "usage: zts show-prompt <context|iteration|retrospective>",
+    );
+    Deno.exit(1);
+  }
+  const res = await fetch(`${BASE_URL}/prompts/${name}`);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const source = res.headers.get("x-prompt-source");
+  if (source === "override") {
+    console.error(
+      `(using override — run with ?default=1 to see compiled default)\n`,
+    );
+  }
+  console.log(await res.text());
 }
 
 async function cmdSize(rest: string[]): Promise<void> {

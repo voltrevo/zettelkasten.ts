@@ -284,21 +284,87 @@ $ curl http://localhost:8000/a/3a/x9/b7f2de1k4m8np3qrs.ts
 
 ### 13. Agent loop runner + workspace
 
-`zts script worker` emits a shell script that runs the autonomous agent loop.
-`zts script context` and `zts script iteration` emit the prompt fragments.
-`zts script setup` initializes a workspace. The prompts and loop runner ship
-with the tool — no loose orchestration files.
+The agent loop runs directly in Deno — no shell scripts, no piping to bash.
+
+**CLI commands:**
+
+- `zts worker [--channel <name>] [--max-turns N] [--once]` — runs the
+  agent loop. Spawns `claude` as a subprocess with `-p` prompt. Manages
+  handovers, captures output, backs off on error.
+- `zts worker setup [--channel <name>] [--workspace <dir>]` — creates
+  workspace directory structure.
+- `zts show-prompt context` — prints the active context prompt
+- `zts show-prompt iteration` — prints the active iteration prompt
+- `zts show-prompt retrospective` — prints the active retrospective prompt
+
+**Prompts:**
+
+Compiled defaults in `src/prompts.ts`. The context prompt is passed via
+`claude -p` (NOT via CLAUDE.md — more explicit, self-contained, no risk
+of accidental edits). Later (web UI step), admin can edit prompts via UI;
+overrides stored in a `prompts` table, `show-prompt` shows the active
+version.
+
+**Retrospectives:**
+
+Every 30 iterations, the worker substitutes the retrospective prompt
+instead of the iteration prompt. The agent reviews recent handovers,
+highlights wins, identifies friction, and suggests improvements. Output
+is saved to `workspace/retrospectives/retro-NNNN.md`. The last 2-3
+retrospectives are included as context for the next retrospective.
+Retrospectives are informational only — admin decides what changes.
+
+**Workspace layout:**
 
 ```
-$ zts script setup --channel bricklane
+workspace/
+  handovers/
+    current.md        ← agent reads at start, writes next.md before exit
+    history/          ← archived handovers
+  notes/
+    current.md        ← rolling focus / orientation
+  retrospectives/
+    retro-0030.md
+    retro-0060.md
+  logs/
+  tmp/
+```
+
+**Worker loop:**
+
+1. Read iteration counter from `workspace/.iteration`
+2. If iteration % 30 == 0: use retrospective prompt, else iteration prompt
+3. Snapshot `current.md`, remove `next.md`
+4. Invoke `claude --dangerously-skip-permissions --max-turns N -p <prompt>`
+5. Capture stream-json to `logs/iter-NNNN/stream.jsonl`
+6. After exit: promote `next.md` → `current.md` (warn if absent), archive
+7. Increment counter, back off 30s on non-zero exit
+
+**Environment exposed to agent:**
+
+```
+ZTS_CHANNEL=<name>
+ZTS_HANDOVER_DIR=<path>
+ZTS_SERVER_URL=http://...
+ZTS_DEV_TOKEN=<token>
+```
+
+No corpus paths. No SQLite paths. No zts source paths.
+
+```
+$ zts worker setup --channel bricklane
 created: workspace/
-  notes/current.md
   handovers/current.md
+  notes/current.md
+  retrospectives/
   logs/
   tmp/
 
-$ zts script worker --channel bricklane | bash
-[iteration 1] reading handover... picking goal... building atoms...
+$ zts worker --channel bricklane --max-turns 80
+[iter 1] build: reading handover... picking goal...
+[iter 2] build: continuing websocket-framing...
+...
+[iter 30] retrospective: reviewing last 30 iterations...
 ```
 
 ---
@@ -334,3 +400,18 @@ $ open http://localhost:8000/ui/
 # → /ui/goals → manage goals, view comment threads, edit weights
 # → /ui/agents → per-channel iteration status, handover preview
 ```
+
+---
+
+### 16. Fixups
+
+Apply deferred small improvements that were noted during implementation:
+
+- **relate/unrelate argument order**: change from `<from> <to> [kind]`
+  to `<from> <kind> <to>` so it reads naturally ("A tests B").
+  Two-arg form still defaults to imports.
+- **Tests required by default**: `-t <tests>` required on `zts post`,
+  `--no-tests` to opt out. Every atom has tests unless explicitly
+  opted out.
+- **Prompt text fixes**: update any prompts or docs that reference the
+  old `-t` opt-in behavior.

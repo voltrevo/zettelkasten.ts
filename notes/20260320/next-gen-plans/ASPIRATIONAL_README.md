@@ -278,17 +278,18 @@ zts admin goal delete <name>
 ### Agent loop
 
 ```sh
-# Run the autonomous loop
-zts script worker | bash
-zts script worker --channel bricklane | bash
-zts script worker --once | bash
+# Run the autonomous loop (runs directly in Deno, no shell scripts)
+zts worker --channel bricklane
+zts worker --channel bricklane --max-turns 80
+zts worker --once
 
 # Initialize a workspace
-zts script setup [--channel <name>] [--workspace <dir>]
+zts worker setup [--channel <name>] [--workspace <dir>]
 
-# Inspect shipped prompts
-zts script context
-zts script iteration
+# Inspect active prompts (DB override if exists, compiled default otherwise)
+zts show-prompt context
+zts show-prompt iteration
+zts show-prompt retrospective
 ```
 
 ---
