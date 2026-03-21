@@ -36,10 +36,11 @@ Corpus:
   zts post -d "desc" -t <tests> [-g <goal>] <file>     store atom (tests required)
   zts get <hash>                                         retrieve source
   zts describe <hash> [-d "text"]                        read or update description
-  zts list [--recent N] [--goal G] [--broken] [--prop K] list atoms
+  zts recent [-n N] [--goal G] [--broken] [--all]        recent atoms (default 20)
   zts info <hash>                                        full atom info
   zts size <file>                                        estimate gzip size
   zts search <query> [-k N]                              semantic search
+  zts similar <hash> [-k N]                             find similar atoms
   zts search --code <query> [-k N]                       source code search
   zts delete <hash>                                      delete orphan
 
@@ -129,7 +130,10 @@ directly (handovers/next.md, notes/current.md, tmp/).
    - Post with tests: zts post -d "desc" -t <test> -g <goal> <file>
    - Build leaves before parents
 4. When you improve on an existing atom: zts relate <new> supersedes <old>
-5. Add observations to the goal: zts goal comment <name> "what you learned"
+5. If you discover something surprising or non-obvious about the goal (a gotcha,
+   a design insight, a dependency you didn't expect), record it:
+   zts goal comment <name> "what you discovered"
+   Do NOT comment routine progress — the handover and logs already capture that.
 6. Before finishing, write your handover to handovers/next.md using the
    Write tool (do not read the directory or current.md first — just write):
    - Goal in progress and current state

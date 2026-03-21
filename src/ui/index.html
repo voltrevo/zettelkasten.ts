@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>zettelkasten.ts</title>
+    <style>
+      *, *::before, *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg-0: #0a0a0f;
+        --bg-1: #12121a;
+        --bg-2: #1a1a26;
+        --bg-3: #252533;
+        --text-0: #e8e8f0;
+        --text-1: #a0a0b8;
+        --text-2: #606078;
+        --accent: #6e8efa;
+        --accent-dim: #4a6ad4;
+        --green: #4ade80;
+        --red: #f87171;
+        --yellow: #fbbf24;
+        --border: #2a2a3a;
+        --radius: 8px;
+        --mono:
+          "Berkeley Mono", "JetBrains Mono", "Fira Code", ui-monospace,
+          monospace;
+        --sans: system-ui, -apple-system, sans-serif;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        background: var(--bg-0);
+        color: var(--text-0);
+        font-family: var(--sans);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        color: var(--text-0);
+      }
+
+      /* ---- Hero ---- */
+      .hero {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(
+            ellipse 60% 50% at 50% 40%,
+            rgba(110, 142, 250, 0.08) 0%,
+            transparent 70%
+          ),
+          radial-gradient(
+          ellipse 40% 30% at 30% 70%,
+          rgba(74, 222, 128, 0.04) 0%,
+          transparent 60%
+        );
+        pointer-events: none;
+      }
+
+      .hero-title {
+        font-family: var(--mono);
+        font-size: clamp(2rem, 6vw, 4rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text-0);
+        position: relative;
+      }
+
+      .hero-title .cursor {
+        display: inline-block;
+        width: 3px;
+        height: 1em;
+        background: var(--accent);
+        margin-left: 4px;
+        vertical-align: text-bottom;
+        animation: blink 1s step-end infinite;
+      }
+
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      .hero-tagline {
+        font-size: clamp(1rem, 2.5vw, 1.25rem);
+        color: var(--text-1);
+        max-width: 600px;
+        margin: 1rem 0 2.5rem;
+      }
+
+      .terminal {
+        background: var(--bg-1);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.25rem 1.5rem;
+        font-family: var(--mono);
+        font-size: 0.875rem;
+        line-height: 1.7;
+        text-align: left;
+        max-width: 620px;
+        width: 100%;
+        margin-bottom: 2.5rem;
+        position: relative;
+      }
+
+      .terminal::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--accent),
+          transparent
+        );
+        opacity: 0.4;
+      }
+
+      .terminal .prompt {
+        color: var(--green);
+      }
+      .terminal .comment {
+        color: var(--text-2);
+      }
+      .terminal .output {
+        color: var(--text-1);
+      }
+      .terminal .hash {
+        color: var(--yellow);
+      }
+
+      .hero-buttons {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1.75rem;
+        border-radius: var(--radius);
+        font-family: var(--sans);
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        transition: all 0.15s ease;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--accent-dim);
+        color: #fff;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 20px rgba(110, 142, 250, 0.3);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-0);
+        border: 1px solid var(--border);
+      }
+      .btn-ghost:hover {
+        border-color: var(--text-2);
+        transform: translateY(-1px);
+      }
+
+      /* ---- How it works ---- */
+      .section {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 6rem 2rem;
+      }
+
+      .section-title {
+        font-family: var(--mono);
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 3rem;
+        text-align: center;
+        color: var(--text-0);
+      }
+
+      .columns {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 2rem;
+      }
+
+      .card {
+        background: var(--bg-1);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.5rem;
+        transition: border-color 0.15s ease;
+      }
+      .card:hover {
+        border-color: var(--text-2);
+      }
+
+      .card-icon {
+        width: 40px;
+        height: 40px;
+        margin-bottom: 1rem;
+        color: var(--accent);
+      }
+
+      .card h3 {
+        font-family: var(--mono);
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+
+      .card p {
+        font-size: 0.875rem;
+        color: var(--text-1);
+        line-height: 1.6;
+      }
+
+      .card code {
+        display: block;
+        margin-top: 0.75rem;
+        background: var(--bg-2);
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        color: var(--text-1);
+        white-space: pre;
+        overflow: hidden;
+      }
+
+      /* ---- Live stats ---- */
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1.5rem;
+        margin-top: 2rem;
+      }
+
+      .stat-card {
+        background: var(--bg-1);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.25rem 1.5rem;
+        text-align: center;
+      }
+
+      .stat-value {
+        font-family: var(--mono);
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--accent);
+        line-height: 1.2;
+      }
+
+      .stat-label {
+        font-size: 0.8rem;
+        color: var(--text-2);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.25rem;
+      }
+
+      .stats-error {
+        text-align: center;
+        color: var(--text-2);
+        font-size: 0.875rem;
+        margin-top: 2rem;
+      }
+
+      /* ---- Features list ---- */
+      .features-list {
+        max-width: 700px;
+        margin: 0 auto;
+      }
+
+      .feature-row {
+        display: flex;
+        gap: 1.5rem;
+        padding: 0.875rem 0;
+        border-bottom: 1px solid var(--border);
+        align-items: baseline;
+      }
+
+      .feature-row:last-child {
+        border-bottom: none;
+      }
+
+      .feature-label {
+        font-family: var(--mono);
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--accent);
+        flex-shrink: 0;
+        width: 11em;
+      }
+
+      .feature-desc {
+        font-size: 0.875rem;
+        color: var(--text-1);
+      }
+
+      @media (max-width: 600px) {
+        .feature-row {
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+        .feature-label {
+          width: auto;
+        }
+      }
+
+      /* ---- Footer ---- */
+      footer {
+        border-top: 1px solid var(--border);
+        padding: 2rem;
+        text-align: center;
+        color: var(--text-2);
+        font-size: 0.875rem;
+      }
+
+      /* ---- Responsive ---- */
+      @media (max-width: 600px) {
+        .terminal {
+          font-size: 0.75rem;
+          padding: 1rem;
+        }
+        .section {
+          padding: 4rem 1.5rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Hero -->
+    <section class="hero">
+      <h1 class="hero-title">zettelkasten.ts<span class="cursor"></span></h1>
+      <p class="hero-tagline">
+        Immutable TypeScript atoms in a content-addressed knowledge base. AI
+        agents build, test, and evolve code — one atom at a time.
+      </p>
+
+      <div class="terminal">
+        <div>
+          <span class="prompt">$</span> zts post -d "greatest common divisor via
+          Euclidean algorithm" -t 9kx3,a1r7 /tmp/gcd.ts
+        </div>
+        <div class="output">
+          201 <span class="hash">3ax9m7kp2v8nf1qjw5e6b</span>
+        </div>
+        <div style="margin-top: 0.5rem">
+          <span class="prompt">$</span> zts search "compute GCD of two integers"
+        </div>
+        <div class="output">
+          0.94 <span class="hash">3ax9m7kp</span> greatest common divisor via
+          Euclidean algorithm
+        </div>
+        <div class="output">
+          0.71 <span class="hash">f2b8q1en</span> extended GCD returning Bezout
+          coefficients
+        </div>
+        <div style="margin-top: 0.5rem">
+          <span class="prompt">$</span> zts test 3ax9m7kp
+        </div>
+        <div class="output">
+          <span style="color: var(--green)">PASS</span> gcd: coprime inputs
+          return 1
+        </div>
+        <div class="output">
+          <span style="color: var(--green)">PASS</span> gcd: handles negative
+          inputs
+        </div>
+        <div class="output">2 tests passed</div>
+      </div>
+
+      <div class="hero-buttons">
+        <a href="/ui/" class="btn btn-primary">Browse Corpus &rarr;</a>
+        <a href="#how" class="btn btn-ghost">How it works</a>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how" class="section">
+      <h2 class="section-title">How it works</h2>
+      <div class="columns">
+        <div class="card">
+          <svg
+            class="card-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M14 3v4a1 1 0 001 1h4" />
+            <path
+              d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"
+            />
+            <path d="M10 13l-1 3 3-1 7-7-2-2z" />
+          </svg>
+          <h3>Write</h3>
+          <p>
+            Each atom is a single TypeScript module with exactly one named
+            export. Pure functions, explicit capabilities, no side effects.
+          </p>
+          <!-- deno-fmt-ignore -->
+          <code>export const gcd = (a, b) =>
+  b ? gcd(b, a % b) : a;</code>
+        </div>
+
+        <div class="card">
+          <svg
+            class="card-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="2" y="6" width="20" height="12" rx="2" />
+            <path d="M6 12h.01M10 12h.01M14 12h.01" />
+          </svg>
+          <h3>Store</h3>
+          <p>
+            Content-addressed by keccak-256 hash. Immutable once stored. The
+            corpus grows but never changes — atoms are superseded, not edited.
+          </p>
+          <code>3ax9m7kp2v8nf1qjw5e6b</code>
+        </div>
+
+        <div class="card">
+          <svg
+            class="card-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="6" cy="6" r="3" />
+            <circle cx="18" cy="18" r="3" />
+            <circle cx="18" cy="6" r="3" />
+            <path d="M8.5 7.5L15.5 16.5" />
+            <path d="M8.5 6L15.5 6" />
+          </svg>
+          <h3>Connect</h3>
+          <p>
+            Atoms form a graph of imports, tests, and supersedes relationships.
+            Tests gate entry — atoms only join the corpus if they pass.
+          </p>
+          <!-- deno-fmt-ignore -->
+          <code>zts relate A supersedes B
+zts test A</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- Agent workflow -->
+    <section class="section">
+      <h2 class="section-title">Built for AI agents</h2>
+      <p style="text-align:center;color:var(--text-1);max-width:640px;margin:0 auto 3rem;font-size:0.9375rem">
+        Agents pick goals, search the corpus for reusable building blocks, write
+        tests first, then build — one atom at a time. Each iteration hands off
+        context to the next. The corpus compounds.
+      </p>
+      <div class="columns" style="grid-template-columns:1fr 1fr">
+        <div class="card">
+          <h3>TDD loop</h3>
+          <p>Write description. Search for matches. Write tests first. Post with
+            test gate — the atom only enters the corpus if tests pass.
+            Relationships are auto-registered.</p>
+        </div>
+        <div class="card">
+          <h3>Supersedes, not edits</h3>
+          <p>Atoms are immutable. When an agent writes a better version, it
+            marks the new atom as superseding the old. The lineage graph tracks
+            the evolution.</p>
+        </div>
+        <div class="card">
+          <h3>Semantic search</h3>
+          <p>Descriptions are embedded with nomic-embed-text. Longer, more
+            detailed queries produce better matches. Agents search on the full
+            description they wrote before coding.</p>
+        </div>
+        <div class="card">
+          <h3>Goals &amp; handovers</h3>
+          <p>Weighted goals guide what gets built. Each agent iteration writes
+            a handover for the next. Retrospectives every 30 iterations surface
+            friction and wins.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="section">
+      <h2 class="section-title">Features</h2>
+      <div class="features-list">
+        <div class="feature-row">
+          <span class="feature-label">Size limit</span>
+          <span class="feature-desc">1024 bytes gzipped after minification — forces small, composable units</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-label">Content-addressed</span>
+          <span class="feature-desc">keccak-256 hash identifies every atom — same code always produces the same address</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-label">Test gates</span>
+          <span class="feature-desc">Atoms must pass their tests before entering the corpus — quality is enforced at submission</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-label">Three relationship kinds</span>
+          <span class="feature-desc">imports (dependencies), tests (verification), supersedes (evolution)</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-label">Full-text + semantic search</span>
+          <span class="feature-desc">FTS5 on source code, embedding search on descriptions — find atoms by what they do</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-label">Capability convention</span>
+          <span class="feature-desc">I/O via explicit cap parameter — atoms are pure and testable by default</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-label">Audit log</span>
+          <span class="feature-desc">Every write operation is logged — full traceability of corpus evolution</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-label">Three auth tiers</span>
+          <span class="feature-desc">Unauthenticated reads, dev writes, admin goal management — simple bearer tokens</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live stats -->
+    <section class="section">
+      <h2 class="section-title">Live corpus</h2>
+      <div id="stats" class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="s-atoms">—</div>
+          <div class="stat-label">atoms</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="s-goals">—</div>
+          <div class="stat-label">active goals</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="s-defects">—</div>
+          <div class="stat-label">defects</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="s-recent">—</div>
+          <div class="stat-label">atoms this week</div>
+        </div>
+      </div>
+      <div id="stats-err" class="stats-error" hidden></div>
+    </section>
+
+    <!-- CTA -->
+    <section class="section" style="text-align:center;padding-bottom:4rem">
+      <h2 class="section-title">Start exploring</h2>
+      <p style="color:var(--text-1);max-width:480px;margin:0 auto 2rem;font-size:0.9375rem">
+        Browse the corpus, inspect dependency graphs, track goals, and manage
+        agent prompts — all from the browser.
+      </p>
+      <a href="/ui/" class="btn btn-primary" style="padding:0.875rem 2.5rem;font-size:1.0625rem">Open Dashboard &rarr;</a>
+    </section>
+
+    <footer>
+      zettelkasten.ts
+    </footer>
+
+    <script>
+      (async () => {
+        try {
+          const r = await fetch("/status");
+          if (!r.ok) throw new Error(r.statusText);
+          const s = await r.json();
+          const set = (id, v) => {
+            document.getElementById(id).textContent = v;
+          };
+          set("s-atoms", s.totalAtoms?.toLocaleString() ?? "0");
+          set("s-goals", s.activeGoals?.length ?? "0");
+          set("s-defects", s.defects ?? "0");
+          set("s-recent", s.recentAtoms ?? "0");
+        } catch {
+          document.getElementById("stats-err").hidden = false;
+          document.getElementById("stats-err").textContent =
+            "Could not load live stats";
+        }
+      })();
+    </script>
+  </body>
+</html>

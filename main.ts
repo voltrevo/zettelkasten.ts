@@ -188,18 +188,25 @@ zts search --code <query> [-k N]
   -k N       max results (default: 10 for semantic, 20 for code)
   --code     search source code instead of descriptions`,
 
+  similar: `zts similar <hash> [-k N]
+  Find atoms with similar descriptions using stored embeddings.
+  Skips the embedding step — uses the atom's existing embedding vector.
+  Returns 404 if the atom has no description/embedding.
+  -k N       max results (default: 10)`,
+
   test: `zts test <hash>
   Run all applicable tests (expected_outcome=pass) for an atom.`,
 
   delete: `zts delete <hash>
   Delete an orphan atom (no relationships). Returns 409 if atom has relationships.`,
 
-  list: `zts list [--recent N] [--goal G] [--broken] [--prop K]
-  List atoms.
-  --recent N   last N atoms by creation time
+  recent: `zts recent [-n N] [--goal G] [--broken] [--prop K] [--all]
+  Show recent atoms (default 20).
+  -n N         number of atoms to show (default 20)
   --goal G     filter by goal name
   --broken     only atoms with BROKEN: prefix in description
-  --prop K     only atoms with property K set`,
+  --prop K     only atoms with property K set
+  --all        show all atoms (no limit)`,
 
   info: `zts info <hash>
   Full atom info: source, description, gzip size, goal, creation date,
@@ -362,6 +369,10 @@ switch (command) {
     await cmdDescribe(rest);
     break;
 
+  case "similar":
+    await cmdSimilar(rest);
+    break;
+
   case "search":
     await cmdSearch(rest);
     break;
@@ -374,8 +385,8 @@ switch (command) {
     await cmdDelete(rest);
     break;
 
-  case "list":
-    await cmdList();
+  case "recent":
+    await cmdRecent();
     break;
 
   case "info":
@@ -450,11 +461,12 @@ Corpus:
                                store atom (tests required, --no-tests to skip)
   get <hash>                   retrieve source
   delete <hash>                delete orphan atom
-  list [--recent N] [--goal G] [--broken] [--prop K]
-                               list atoms
+  recent [-n N] [--goal G] [--broken] [--all]
+                               recent atoms (default 20)
   info <hash>                  source, description, relationships, properties
   describe <hash> [-d <text>]  read or update description
   search <query> [-k N]        semantic search on descriptions
+  similar <hash> [-k N]        find similar atoms by embedding
   search --code <query> [-k N] full-text search on source
   size <file>                  estimate gzip size (client-side)
   exec <hash|file.zip> [args]  run atom's main(globalThis)
@@ -795,9 +807,10 @@ async function cmdDelete(rest: string[]): Promise<void> {
   }
 }
 
-async function cmdList(): Promise<void> {
-  const url = new URL(`${BASE_URL}/list`);
-  if (args.recent) url.searchParams.set("recent", args.recent);
+async function cmdRecent(): Promise<void> {
+  const url = new URL(`${BASE_URL}/recent`);
+  if (args.n) url.searchParams.set("n", args.n);
+  if (args.all) url.searchParams.set("all", "1");
   if (args.goal) url.searchParams.set("goal", args.goal);
   if (args.broken) url.searchParams.set("broken", "1");
   if (args.prop) url.searchParams.set("prop", args.prop);
@@ -1720,6 +1733,35 @@ async function cmdDescribe(rest: string[]): Promise<void> {
       Deno.exit(1);
     }
     console.log(await res.text());
+  }
+}
+
+async function cmdSimilar(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts similar <hash> [-k <n>]");
+    Deno.exit(1);
+  }
+  const k = args.k ?? "10";
+  const url = new URL(`${BASE_URL}/similar/${hash}`);
+  url.searchParams.set("k", k);
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`error: ${res.status} ${await res.text()}`);
+    Deno.exit(1);
+  }
+  const hits = await res.json() as Array<{
+    hash: string;
+    score: number;
+    description: string;
+  }>;
+  if (hits.length === 0) {
+    console.log("no similar atoms");
+    return;
+  }
+  for (const hit of hits) {
+    const score = hit.score.toFixed(3);
+    console.log(`${hit.hash}  ${score}  ${hit.description}`);
   }
 }
 

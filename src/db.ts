@@ -795,10 +795,20 @@ export class Db {
     query: string,
     limit: number = 20,
   ): { hash: string; snippet: string }[] {
+    // Quote each token to prevent FTS5 syntax errors from special chars
+    const tokens = query
+      .split(/\s+/)
+      .filter((t) => t.length > 0);
+    if (tokens.length === 0) return [];
+    const safe = tokens
+      .map((t) => `"${t.replace(/"/g, '""')}"`)
+      .join(" ");
     return this.db.prepare(
-      `SELECT hash, snippet(atoms_fts, 1, '>>>', '<<<', '...', 40) as snippet
-       FROM atoms_fts WHERE source MATCH ? ORDER BY rank LIMIT ?`,
-    ).all<{ hash: string; snippet: string }>(query, limit);
+      "SELECT hash, snippet(atoms_fts, 1, '[[', ']]', '...', 40) as snippet FROM atoms_fts WHERE source MATCH ? ORDER BY rank LIMIT ?",
+    ).all<{ hash: string; snippet: string }>(safe, limit).map((r) => ({
+      hash: r.hash,
+      snippet: r.snippet.replace(/\[\[/g, "<mark>").replace(/]]/g, "</mark>"),
+    }));
   }
 
   /** Rebuild the FTS index from all atoms. Call after migration. */
@@ -966,6 +976,13 @@ export class Db {
         createdAt: r.created_at,
       }),
     );
+  }
+
+  deleteGoalComment(id: number): boolean {
+    const result = this.db.prepare("DELETE FROM goal_comments WHERE id = ?").run(
+      id,
+    );
+    return result > 0;
   }
 
   goalExists(name: string): boolean {

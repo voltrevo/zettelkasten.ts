@@ -35,6 +35,31 @@ const PROCESS_TIMEOUT_MS = 5000; // process lifecycle (startup + import + run)
 
 const ADMIN_ONLY_PROPERTIES = new Set(["starred"]);
 
+const UI_DIR = new URL("./ui", import.meta.url).pathname;
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+};
+
+async function serveStatic(filePath: string): Promise<Response | null> {
+  try {
+    const data = await Deno.readFile(filePath);
+    const ext = filePath.substring(filePath.lastIndexOf("."));
+    return new Response(data, {
+      headers: {
+        "content-type": MIME_TYPES[ext] ?? "application/octet-stream",
+        "cache-control": "no-cache",
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
 let db: Db;
 let hnswIndex: HnswIndex;
 let authConfig: AuthConfig;
@@ -173,12 +198,21 @@ function parseHashFromPath(path: string): string | null {
   return match[1] + match[2] + match[3];
 }
 
+/** Extract bearer token from Authorization header or zts_token cookie. */
+function extractToken(req: Request): string | null {
+  const auth = req.headers.get("authorization");
+  if (auth) return auth;
+  const cookie = req.headers.get("cookie");
+  if (cookie) {
+    const match = cookie.match(/(?:^|;\s*)zts_token=([^\s;]+)/);
+    if (match) return `Bearer ${match[1]}`;
+  }
+  return null;
+}
+
 /** Check auth tier for a request. Returns error Response or null. */
 function requireAuth(req: Request, tier: AuthTier): Response | null {
-  const resolved = resolveAuthTier(
-    req.headers.get("authorization"),
-    authConfig,
-  );
+  const resolved = resolveAuthTier(extractToken(req), authConfig);
   return checkAuth(resolved, tier);
 }
 
@@ -212,6 +246,75 @@ async function handler(req: Request): Promise<Response> {
 async function route(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
+
+  // --- Static UI routes ---
+  if (req.method === "GET" && path === "/") {
+    return (await serveStatic(`${UI_DIR}/index.html`)) ??
+      new Response("Not found", { status: 404 });
+  }
+  if (req.method === "GET" && path === "/ui") {
+    return new Response(null, {
+      status: 301,
+      headers: { location: "/ui/" },
+    });
+  }
+  // POST /ui/login — set auth cookie
+  if (req.method === "POST" && path === "/ui/login") {
+    const body = await req.json();
+    const token = body.token as string;
+    if (!token) {
+      return new Response("Missing token", { status: 400 });
+    }
+    const tier = resolveAuthTier(`Bearer ${token}`, authConfig);
+    if (!tier) {
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const cookie =
+      `zts_token=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`;
+    return new Response(JSON.stringify({ tier }), {
+      headers: {
+        "content-type": "application/json",
+        "set-cookie": cookie,
+      },
+    });
+  }
+
+  // POST /ui/logout — clear auth cookie
+  if (req.method === "POST" && path === "/ui/logout") {
+    const cookie = "zts_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
+    return new Response(null, {
+      status: 204,
+      headers: { "set-cookie": cookie },
+    });
+  }
+
+  // GET /ui/login.html — always accessible (no auth required)
+  if (req.method === "GET" && path === "/ui/login.html") {
+    return (await serveStatic(`${UI_DIR}/login.html`)) ??
+      new Response("Not found", { status: 404 });
+  }
+
+  // Static UI files (catch-all) — require auth for app shell
+  if (req.method === "GET" && path.startsWith("/ui/")) {
+    // Gate the app shell behind auth
+    if (path === "/ui/" || path === "/ui/app.html") {
+      const token = extractToken(req);
+      const tier = resolveAuthTier(token, authConfig);
+      if (!tier || tier === "unauthed") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "/ui/login.html" },
+        });
+      }
+    }
+    const rel = path === "/ui/" ? "app.html" : path.slice(4);
+    if (rel.includes("..")) return new Response("Forbidden", { status: 403 });
+    return (await serveStatic(`${UI_DIR}/${rel}`)) ??
+      new Response("Not found", { status: 404 });
+  }
 
   // GET /a/<aa>/<bb>/<rest>.ts — retrieve code by content address
   if (req.method === "GET") {
@@ -469,8 +572,9 @@ async function route(req: Request): Promise<Response> {
         return new Response(JSON.stringify(body), {
           headers: { "content-type": "application/json" },
         });
-      } catch {
-        return new Response("Invalid FTS5 query syntax", { status: 400 });
+      } catch (e) {
+        console.error("[search] FTS error:", e);
+        return new Response(`Search error: ${e instanceof Error ? e.message : e}`, { status: 400 });
       }
     }
 
@@ -502,14 +606,45 @@ async function route(req: Request): Promise<Response> {
     });
   }
 
-  // GET /list?recent=N&goal=G&broken=1&prop=K — list atoms
-  if (req.method === "GET" && path === "/list") {
-    const recent = url.searchParams.get("recent");
+  // GET /similar/<hash>?k=10 — find similar atoms by embedding
+  if (req.method === "GET") {
+    const simMatch = path.match(/^\/similar\/([a-z0-9]+)$/);
+    if (simMatch) {
+      const resolved = resolveHash(simMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const embedding = db.getEmbedding(resolved);
+      if (!embedding) {
+        return new Response("No embedding for this atom", { status: 404 });
+      }
+      const k = Math.min(
+        parseInt(url.searchParams.get("k") ?? "10", 10),
+        100,
+      );
+      const hits = hnswIndex.search(embedding.vector, k + 1)
+        .filter((h) => h.hash !== resolved)
+        .slice(0, k);
+      const body = hits.map(({ hash, score }) => ({
+        hash,
+        score,
+        url: hashToUrlPath(hash),
+        description: db.getDescription(hash) ?? "",
+      }));
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
+  // GET /recent?n=N&goal=G&broken=1&prop=K&all=1 — recent atoms (default 20)
+  if (req.method === "GET" && path === "/recent") {
+    const n = url.searchParams.get("n");
+    const all = url.searchParams.get("all") === "1";
     const goal = url.searchParams.get("goal") ?? undefined;
     const broken = url.searchParams.get("broken") === "1";
     const prop = url.searchParams.get("prop") ?? undefined;
+    const limit = all ? undefined : (n ? parseInt(n, 10) : 20);
     const atoms = db.listAtoms({
-      recent: recent ? parseInt(recent, 10) : undefined,
+      recent: limit,
       goal,
       broken,
       prop,
@@ -1170,6 +1305,25 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
+  // DELETE /goals/<name>/comments/<id> — delete comment [dev]
+  if (req.method === "DELETE") {
+    const delComment = path.match(
+      /^\/goals\/([a-zA-Z0-9_-]+)\/comments\/(\d+)$/,
+    );
+    if (delComment) {
+      const authErr = requireAuth(req, "admin");
+      if (authErr) return authErr;
+      if (!db.deleteGoalComment(parseInt(delComment[2], 10))) {
+        return new Response("Comment not found", { status: 404 });
+      }
+      db.insertLog({
+        op: "goal.comment.delete",
+        subject: delComment[1],
+      });
+      return new Response(null, { status: 204 });
+    }
+  }
+
   return new Response("Not found", { status: 404 });
 }
 
@@ -1219,7 +1373,7 @@ export async function serve(): Promise<void> {
     "  GET  /bundle/<hash>              — download zip bundle of atom + dependencies",
   );
   console.log(
-    "  GET  /list?recent=N&goal=G       — list atoms",
+    "  GET  /recent?n=N&goal=G&all=1    — recent atoms (default 20)",
   );
   console.log(
     "  GET  /info/<hash>                — full atom info (source, rels, tests)",
@@ -1232,6 +1386,9 @@ export async function serve(): Promise<void> {
   );
   console.log(
     "  GET  /search?q=<text>[&k=10]     — semantic nearest-neighbor search",
+  );
+  console.log(
+    "  GET  /similar/<hash>[?k=10]      — find similar atoms by embedding",
   );
   console.log(
     "  Hash prefixes accepted everywhere (e.g. /info/3ax9 instead of full 25-char hash)",

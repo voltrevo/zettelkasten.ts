@@ -102,11 +102,12 @@ zts post -d "desc" --no-tests <file>                # skip test requirement
 zts post --no-description --no-tests <file>         # skip both (not recommended)
 zts get <hash>                                       # retrieve source
 zts describe <hash> [-d "text"]                      # read or update description
-zts list [--recent N] [--goal G] [--broken] [--prop K]  # list atoms
+zts recent [-n N] [--goal G] [--broken] [--prop K] [--all]  # recent atoms (default 20)
 zts info <hash>                                      # full atom info
 zts size <file>                                      # estimate gzip size
 zts search <query> [-k N]                            # semantic search on descriptions
 zts search --code <query> [-k N]                     # FTS5 search on source code
+zts similar <hash> [-k N]                            # find similar atoms by embedding
 zts delete <hash>                                    # delete orphan (409 if has rels)
 zts exec <hash> [args...]                            # run atom's main(globalThis)
 zts bundle <hash> [-o <dir>]                         # ZIP of atom + transitive deps

@@ -17,6 +17,7 @@ export async function fetchEmbedding(
   config: EmbedConfig,
 ): Promise<Float32Array | null> {
   try {
+    const t0 = performance.now();
     const res = await fetch(config.url, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -28,6 +29,8 @@ export async function fetchEmbedding(
       return null;
     }
     const json = await res.json();
+    const ms = Math.round(performance.now() - t0);
+    console.log(`[embed] ${ms}ms (${text.length} chars)`);
     // Ollama format
     if (Array.isArray(json.embedding)) {
       return new Float32Array(json.embedding);

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>zts</title>
+    <link rel="stylesheet" href="/ui/ui.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+  </head>
+  <body>
+    <div id="app" class="app" hidden>
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo"><a href="#/dashboard">zts</a></div>
+        <nav class="sidebar-nav">
+          <a href="#/dashboard" data-page="dashboard">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            Dashboard
+          </a>
+          <a href="#/search" data-page="search">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+            Search
+          </a>
+          <a href="#/graph" data-page="graph">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <circle cx="6" cy="6" r="2.5" />
+              <circle cx="18" cy="6" r="2.5" />
+              <circle cx="6" cy="18" r="2.5" />
+              <circle cx="18" cy="18" r="2.5" />
+              <path d="M8.5 6H15.5M6 8.5V15.5M8.5 17L15.5 7" />
+            </svg>
+            Graph
+          </a>
+          <a href="#/goals" data-page="goals">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <circle cx="12" cy="12" r="5" />
+              <circle cx="12" cy="12" r="1" />
+            </svg>
+            Goals
+          </a>
+          <a href="#/log" data-page="log">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path d="M14 3v4a1 1 0 001 1h4" />
+              <path
+                d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"
+              />
+              <path d="M9 13h6M9 17h3" />
+            </svg>
+            Audit Log
+          </a>
+          <a href="#/prompts" data-page="prompts">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+            Prompts
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          <button id="logout-btn">Logout</button>
+        </div>
+      </aside>
+
+      <div class="main">
+        <div class="topbar">
+          <button class="topbar-toggle" id="menu-toggle">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M3 12h18M3 6h18M3 18h18" />
+            </svg>
+          </button>
+          <span
+            style="font-family: var(--mono); font-size: 0.875rem; font-weight: 600"
+          >zts</span>
+        </div>
+        <div class="content" id="page-content">
+          <div class="loading">Loading</div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>

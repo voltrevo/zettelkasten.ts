@@ -13,7 +13,7 @@
     "exclude": ["samples/"]
   },
   "lint": {
-    "exclude": ["samples/"]
+    "exclude": ["samples/", "src/ui/"]
   },
   "lock": {
     "frozen": false,
