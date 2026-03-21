@@ -84,13 +84,7 @@ registerPage("search", async () => {
         if (goal) params.set("goal", goal);
         if (broken) params.set("broken", "1");
         params.set("n", "50");
-        data = (await apiJson(`/recent?${params}`)).map((a) => ({
-          hash: a.hash,
-          description: a.description,
-          goal: a.goal,
-          createdAt: a.created_at,
-          gzipSize: a.gzip_size,
-        }));
+        data = await apiJson(`/recent?${params}`);
       } else if (mode === "code") {
         data = await apiJson(
           `/search?code=${encodeURIComponent(q)}&k=50`,

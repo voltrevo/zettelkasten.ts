@@ -32,11 +32,11 @@ registerPage("starred", async () => {
     if (a.goal) {
       top.append(h("span", { class: "badge badge-blue" }, a.goal));
     }
-    if (a.created_at) {
+    if (a.createdAt) {
       top.append(
         h("span", {
           style: "font-size:0.75rem;color:var(--text-2)",
-        }, relTime(a.created_at)),
+        }, relTime(a.createdAt)),
       );
     }
     card.append(top);

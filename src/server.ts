@@ -1151,6 +1151,42 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
+  // PUT /prompts/<name> — set prompt override [admin]
+  if (req.method === "PUT") {
+    const promptMatch = path.match(
+      /^\/prompts\/(context|iteration|retrospective)$/,
+    );
+    if (promptMatch) {
+      const authErr = requireAuth(req, "admin");
+      if (authErr) return authErr;
+      const name = promptMatch[1] as PromptName;
+      const body = await req.text();
+      if (!body.trim()) {
+        return new Response("Empty prompt body", { status: 400 });
+      }
+      db.setPromptOverride(name, body);
+      db.insertLog({ op: "prompt.set", subject: name });
+      return new Response("ok\n", {
+        headers: { "content-type": "text/plain" },
+      });
+    }
+  }
+
+  // DELETE /prompts/<name> — reset prompt to default [admin]
+  if (req.method === "DELETE") {
+    const promptMatch = path.match(
+      /^\/prompts\/(context|iteration|retrospective)$/,
+    );
+    if (promptMatch) {
+      const authErr = requireAuth(req, "admin");
+      if (authErr) return authErr;
+      const name = promptMatch[1] as PromptName;
+      db.deletePromptOverride(name);
+      db.insertLog({ op: "prompt.delete", subject: name });
+      return new Response(null, { status: 204 });
+    }
+  }
+
   // --- Goals ---
 
   // GET /goals — list non-done goals
