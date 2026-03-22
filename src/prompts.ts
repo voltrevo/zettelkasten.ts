@@ -66,6 +66,17 @@ A test atom exports a class named Test with a static name and a run(target) meth
       if (target(7, 13) !== 1) throw new Error("expected gcd(7,13) = 1");
     }
   }
+
+## Test quality
+
+Tests must verify correctness, not just existence. A good test:
+- Uses known-answer values (e.g. CRC-32 of "hello" = 0x3610A686, not just empty input)
+- Tests multiple cases including edge cases (empty, one element, large, negative)
+- Checks specific output values, not just "output.length > 0"
+- For binary formats: constructs real valid input and verifies exact decoded fields
+
+A bad test only checks that the function doesn't crash. If the implementation
+returned garbage, would your test catch it? If not, make it stricter.
 `;
 
 export const DEFAULT_ITERATION = `\
