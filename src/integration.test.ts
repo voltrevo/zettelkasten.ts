@@ -107,6 +107,7 @@ Deno.test("integration: full workflow", async (t) => {
       atomHash = await client.postAtom(source, {
         description: "Adds two numbers and returns the sum",
         goal: "test-goal",
+        noTests: true,
       });
       log("posted atom:", atomHash);
       assertEquals(atomHash.length, 25);
@@ -205,6 +206,7 @@ Deno.test("integration: full workflow", async (t) => {
         `// The mathematical constant pi\nexport const PI = 3.14159;\n`;
       atom2Hash = await client.postAtom(source, {
         description: "The mathematical constant pi",
+        noTests: true,
       });
       log("posted atom2:", atom2Hash);
       const atoms = await client.recent({ n: 10 });
@@ -368,6 +370,7 @@ Deno.test("integration: full workflow", async (t) => {
         () =>
           unauthClient.postAtom("export const x = 1;\n", {
             description: "test",
+            noTests: true,
           }),
         ApiError,
       );
@@ -410,6 +413,7 @@ Deno.test("integration: full workflow", async (t) => {
         `// Adds two numbers and returns the sum\nexport function add(a: number, b: number): number { return a + b; }\n`;
       const hash2 = await client.postAtom(source, {
         description: "Adds two numbers and returns the sum",
+        noTests: true,
       });
       assertEquals(hash2, atomHash);
     });
@@ -424,6 +428,7 @@ Deno.test("integration: full workflow", async (t) => {
       }";\nexport function double(n: number): number { return add(n, n); }\n`;
       depAtomHash = await client.postAtom(source, {
         description: "Doubles a number using add",
+        noTests: true,
       });
       log("posted dep atom:", depAtomHash, "imports:", atomHash);
       assertEquals(depAtomHash.length, 25);
@@ -481,15 +486,15 @@ Deno.test("integration: full workflow", async (t) => {
     await timed(t, "supersedes chain: A <- B <- C", async () => {
       chainA = await client.postAtom(
         `// Chain A\nexport const A = 1;\n`,
-        { allowNoDescription: true },
+        { allowNoDescription: true, noTests: true },
       );
       chainB = await client.postAtom(
         `// Chain B\nexport const B = 2;\n`,
-        { allowNoDescription: true },
+        { allowNoDescription: true, noTests: true },
       );
       chainC = await client.postAtom(
         `// Chain C\nexport const C = 3;\n`,
-        { allowNoDescription: true },
+        { allowNoDescription: true, noTests: true },
       );
       log(
         `chain: ${chainA.slice(0, 8)}… <- ${chainB.slice(0, 8)}… <- ${

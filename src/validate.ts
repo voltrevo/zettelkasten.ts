@@ -100,3 +100,23 @@ export async function validateAtom(
 
   return errors.length > 0 ? { message: errors.join("; ") } : null;
 }
+
+/** Check if the atom's single value export is a class named Test. */
+export function isTestAtom(source: string): boolean {
+  const file = ts.createSourceFile(
+    "atom.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  for (const node of file.statements) {
+    if (
+      ts.isClassDeclaration(node) &&
+      node.name?.text === "Test" &&
+      ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export
+    ) {
+      return true;
+    }
+  }
+  return false;
+}

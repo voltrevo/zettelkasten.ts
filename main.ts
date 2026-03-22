@@ -90,6 +90,7 @@ const args = parseArgs(Deno.args, {
     "f",
     "no-description",
     "no-tests",
+    "is-test",
     "broken",
     "all",
     "done",
@@ -143,13 +144,17 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   get: `zts get <hash>
   Retrieve and print atom source code. Hash prefixes accepted.`,
 
-  post:
-    `zts post -d <description> -t <test-hashes> [-g <goal>] [--no-tests] [--no-description] <file>
-  Store a new atom.
+  post: `zts post -d <description> -t <test-hashes> [-g <goal>] <file>
+  zts post -d <description> --is-test <file>
+  zts post -d <description> --no-tests <file>
+
+  Store a new atom. One testing mode is required:
+  -t <hash,hash,...> run these tests before storing (deps must also be tested)
+  --is-test          this atom is a test (must export class Test; deps must be tested)
+  --no-tests         skip all testing (discouraged — creates untested debt)
+
   -d <desc>          description (required unless --no-description)
-  -t <hash,hash,...> test hashes to run before storing (required unless --no-tests)
   -g <goal>          tag atom with a goal
-  --no-tests         skip test requirement
   --no-description   skip description requirement`,
 
   exec: `zts exec <hash|file.zip> [args...]
@@ -247,7 +252,7 @@ zts eval set <test> <target> --expected <outcome> [--commentary <text>]
     `zts goal pick [--n N]                weighted random sample of active goals
 zts goal show <name>                  full body + all comments
 zts goal list [--done] [--all]        list goals
-zts goal done <name>                  mark complete
+zts goal done <name>                  mark complete (last comment must start with "DONE:")
 zts goal undone <name>                revert completion
 zts goal comment <name> <text>        append observation
 zts goal comments <name> [--recent N] read observations`,
@@ -475,7 +480,11 @@ switch (command) {
 
 Corpus:
   post -d <desc> -t <tests> [-g <goal>] <file>
-                               store atom (tests required, --no-tests to skip)
+                               store atom with tests
+  post -d <desc> --is-test <file>
+                               store test atom (validates Test export)
+  post -d <desc> --no-tests <file>
+                               store without testing (discouraged)
   get <hash>                   retrieve source
   delete <hash>                delete orphan atom
   recent [-n N] [--goal G] [--broken] [--all]
@@ -516,7 +525,7 @@ Goals:
   goal pick [--n N]            weighted random sample
   goal show <name>             body + comments
   goal list [--done] [--all]   list goals
-  goal done <name>             mark complete
+  goal done <name>             mark complete (last comment must start with "DONE:")
   goal undone <name>           revert
   goal comment <name> <text>   append observation
   goal comments <name> [--recent N]
@@ -543,6 +552,7 @@ Agent loop:
 Scripting:
   script '<code>'              type-check and run inline TypeScript with zts client
   script -f <file.ts>          run script from file
+  script --types               print ZtsClient type definitions
 
 Server:
   run                          start server in foreground
@@ -750,17 +760,18 @@ async function cmdPost(rest: string[]): Promise<void> {
   const description = args.d;
   const noDescription = args["no-description"];
   const noTests = args["no-tests"];
+  const isTest = args["is-test"];
   if (!description && !noDescription) {
     console.error(
-      "usage: zts post -d <description> -t <test1,test2,...> [-g <goal>] [file]",
+      "usage: zts post -d <description> -t <tests> [-g <goal>] <file>",
     );
-    console.error("  --no-description   opt out of required description");
-    console.error("  --no-tests         opt out of required tests");
+    console.error("       zts post -d <description> --is-test <file>");
+    console.error("       zts post -d <description> --no-tests <file>");
     Deno.exit(1);
   }
-  if (!args.t && !noTests) {
+  if (!args.t && !isTest && !noTests) {
     console.error(
-      "error: -t <test-hashes> is required. Use --no-tests to opt out.",
+      "error: testing mode required. Use -t <tests>, --is-test, or --no-tests.",
     );
     Deno.exit(1);
   }
@@ -779,6 +790,8 @@ async function cmdPost(rest: string[]): Promise<void> {
       description: description || undefined,
       allowNoDescription: !description ? true : undefined,
       tests: args.t || undefined,
+      isTest: isTest || undefined,
+      noTests: noTests || undefined,
       goal: args.g || undefined,
     });
     console.log(hash);

@@ -30,55 +30,11 @@ cost nothing against the size limit.
 Atoms needing external capabilities (I/O, time, randomness, fetch) accept them
 as an explicit cap first argument and export a Cap type.
 
-## CLI reference
+## CLI
 
-Corpus:
-  zts post -d "desc" -t <tests> [-g <goal>] <file>     store atom (tests required)
-  zts get <hash>                                         retrieve source
-  zts describe <hash> [-d "text"]                        read or update description
-  zts recent [-n N] [--goal G] [--broken] [--all]        recent atoms (default 20)
-  zts info <hash>                                        full atom info
-  zts size <file>                                        estimate gzip size
-  zts search <query> [-k N]                              semantic search
-  zts similar <hash> [-k N]                             find similar atoms
-  zts search --code <query> [-k N]                       source code search
-  zts delete <hash>                                      delete orphan
-
-Relationships:
-  zts rels [--from H] [--to H] [--kind K]    query relationships
-  zts dependents <hash>                      atoms that import this one
-  zts relate <from> <kind> <to>              add relationship (e.g. A tests B)
-  zts unrelate <from> <kind> <to>            remove relationship
-
-Testing:
-  zts test <hash>                            run applicable tests
-  zts violates_intent <test> <atom>          mark correctness defect
-  zts falls_short <test> <atom>              mark quality gap
-  zts eval show <test> <target>              read eval metadata
-  zts runs <hash> [--recent N]               test run history
-
-Lineage:
-  zts tops <hash> [--limit N] [--all]        navigate supersedes graph
-
-Goals:
-  zts goal pick [--n N]                      weighted random sample
-  zts goal show <name>                       full body + comments
-  zts goal list [--done] [--all]             list goals
-  zts goal done <name>                       mark complete
-  zts goal undone <name>                     revert
-  zts goal comment <name> "text"             append observation
-  zts goal comments <name> [--recent N]      read observations
-
-Status:
-  zts status [--since YYYY-MM-DD]            corpus health summary
-  zts log [--recent N] [--op X]              audit log
-
-Properties:
-  zts prop set <hash> <key> [value]          set property
-  zts prop unset <hash> <key>                remove property
-  zts prop list <hash>                       list properties
-
+Run zts -h for the full command list, or zts <command> -h for details.
 Hash prefixes work everywhere (e.g. zts info 3ax9 instead of full 25-char hash).
+Relationship kinds: imports, tests, supersedes.
 
 ## Key conventions
 
@@ -88,8 +44,9 @@ Hash prefixes work everywhere (e.g. zts info 3ax9 instead of full 25-char hash).
 - TypeScript type annotations count toward the gzip budget (minifier doesn't strip them).
 - Use 127.0.0.1 not localhost for Deno TCP connections.
 - Mark supersedes proactively when your atom improves on an existing one.
-- When posting with -t, the test gate checks the full transitive dependency
-  tree. Prefer adding missing tests over using --allow-untested-deps.
+- Every post requires a testing mode: -t <tests>, --is-test, or --no-tests.
+  Use --is-test when posting test atoms. Use --no-tests only as a last resort —
+  untested atoms block downstream -t posts (dep check walks the full tree).
 - Tag atoms with goals using -g when posting.
 - ASCII only in descriptions — no Unicode characters.
 
@@ -126,7 +83,7 @@ directly (handovers/next.md, notes/current.md, tmp/).
    If a usable match exists, reuse it (check with zts info and zts tops).
    If not, proceed — you already have the description for -d.
 3. Work the TDD loop:
-   - Write test atoms first (they don't import the target)
+   - Write test atoms first: zts post -d "desc" --is-test -g <goal> <file>
    - Post with tests: zts post -d "desc" -t <test> -g <goal> <file>
    - Build leaves before parents
 4. When you improve on an existing atom: zts relate <new> supersedes <old>

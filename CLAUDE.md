@@ -101,109 +101,10 @@ environment variables.
 
 ## CLI reference
 
-### Corpus
+Run `zts -h` for the full command list, or `zts <command> -h` for details on any
+specific command. All commands support hash prefixes (e.g. `zts info 3ax9`).
 
-```sh
-zts post -d "desc" -t <tests> [-g <goal>] <file>   # store atom (tests + desc required)
-zts post -d "desc" --no-tests <file>                # skip test requirement
-zts post --no-description --no-tests <file>         # skip both (not recommended)
-zts get <hash>                                       # retrieve source
-zts describe <hash> [-d "text"]                      # read or update description
-zts recent [-n N] [--goal G] [--broken] [--prop K] [--all]  # recent atoms (default 20)
-zts info <hash>                                      # full atom info
-zts size <file>                                      # estimate gzip size
-zts search <query> [-k N]                            # semantic search on descriptions
-zts search --code <query> [-k N]                     # FTS5 search on source code
-zts similar <hash> [-k N]                            # find similar atoms by embedding
-zts delete <hash>                                    # delete orphan (409 if has rels)
-zts exec <hash> [args...]                            # run atom's main(globalThis)
-zts bundle <hash> [-o <dir>]                         # ZIP of atom + transitive deps
-```
-
-### Relationships
-
-```sh
-zts rels [--from H] [--to H] [--kind K]   # query (at least one filter required)
-zts dependents <hash>                      # atoms that import this one
-zts relate <from> <kind> <to>              # add (reads naturally: "A tests B")
-zts unrelate <from> <kind> <to>            # remove
-zts tops <hash> [--limit N] [--all]        # navigate supersedes graph upward
-```
-
-Kinds: `imports`, `tests`, `supersedes`.
-
-### Testing
-
-```sh
-zts test <hash>                            # run applicable tests (expected_outcome=pass)
-zts violates_intent <test> <atom>          # mark correctness defect
-zts falls_short <test> <atom>              # mark quality gap
-zts eval show <test> <target>              # read eval metadata
-zts eval set <test> <target> --expected <outcome> [--commentary <text>]
-zts runs <hash> [--recent N]               # test run history
-```
-
-### Properties
-
-```sh
-zts prop set <hash> <key> [value]          # set (admin-only keys auto-detected)
-zts prop unset <hash> <key>                # remove
-zts prop list <hash>                       # list
-```
-
-### Goals
-
-```sh
-zts goal pick [--n N]                      # weighted random sample of active goals
-zts goal show <name>                       # full body + all comments
-zts goal list [--done] [--all]             # list goals
-zts goal done <name>                       # mark complete (requires last comment starts with "DONE:")
-zts goal undone <name>                     # revert
-zts goal comment <name> "text"             # append observation
-zts goal comments <name> [--recent N]      # read observations
-```
-
-### Admin
-
-```sh
-zts admin goal add <name> [--weight N] [--body <text>]
-zts admin goal set <name> [--weight N] [--body <text>]
-zts admin goal delete <name>
-zts show-prompt <context|iteration|retrospective>
-```
-
-### Status & logs
-
-```sh
-zts status [--since YYYY-MM-DD]            # corpus health summary
-zts log [--recent N] [--op X] [--subject X]  # audit log
-zts server-log [-f] [-n <lines>]           # process log (tail)
-```
-
-### Agent loop
-
-```sh
-zts worker run [flags]                     # start the agent loop
-zts worker setup [flags]                   # create workspace
-zts worker stop [flags]                    # stop a running worker
-
-# Flags: --channel, --max-turns, --max-iters, --once, --model,
-#   --dangerously-skip-permissions, --context-prompt, --iteration-prompt,
-#   --retrospective-prompt, --workspaces-dir
-```
-
-### Scripting
-
-```sh
-zts script '<inline code>'                 # type-check and run inline TS with zts client
-zts script -f <file.ts>                    # run from file
-zts script --types                         # print ZtsClient type definitions
-```
-
-The `zts` global is a pre-configured `ZtsClient` — no imports needed, types are
-injected automatically.
-
-All commands support `-h`/`--help` for detailed usage.
+Relationship kinds: `imports`, `tests`, `supersedes`.
 
 ## CLI workflow for adding atoms
 
@@ -217,8 +118,16 @@ zts post -d "brief description" -t "<test1>,<test2>" /tmp/myatom.ts
 import { myFn } from "../../xx/yy/<rest>.ts";
 ```
 
-Descriptions are required (`-d`). Tests are required (`-t`). Use `--no-tests` or
-`--no-description` to opt out explicitly.
+Descriptions are required (`-d`). Use `--no-description` to opt out.
+
+One testing mode is required on every post:
+
+- **`-t <hashes>`** — run these tests, verify deps are tested. The standard
+  path.
+- **`--is-test`** — for test atoms. Validates the atom exports `class Test`,
+  checks deps are tested, but doesn't require tests-of-tests.
+- **`--no-tests`** — skip all testing. Use only as a last resort — untested
+  atoms block downstream `-t` posts (the dep check walks the full import tree).
 
 Description must be **ASCII only** — Unicode characters cause a ByteString error
 in the HTTP header.

@@ -148,6 +148,8 @@ export interface PostAtomOpts {
   description?: string;
   tests?: string;
   goal?: string;
+  isTest?: boolean;
+  noTests?: boolean;
   allowNoDescription?: boolean;
 }
 
@@ -351,6 +353,8 @@ function buildClient(
       if (opts.description) headers["x-description"] = opts.description;
       if (opts.allowNoDescription) headers["x-allow-no-description"] = "true";
       if (opts.tests) headers["x-require-tests"] = opts.tests;
+      if (opts.isTest) headers["x-is-test"] = "true";
+      if (opts.noTests) headers["x-no-tests"] = "true";
       if (opts.goal) headers["x-goal"] = opts.goal;
       const urlPath = (await text("/a", {
         method: "POST",

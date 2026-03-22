@@ -18,7 +18,7 @@ import {
 import { HnswIndex } from "./hnsw.ts";
 import { minify } from "./minify.ts";
 import { getDefaultPrompt, type PromptName } from "./prompts.ts";
-import { validateAtom } from "./validate.ts";
+import { isTestAtom, validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
 
@@ -366,8 +366,31 @@ async function route(req: Request): Promise<Response> {
       });
     }
 
-    // Optional: run tests before storing
+    // One of three testing modes is required
     const requireTests = req.headers.get("x-require-tests");
+    const isTest = req.headers.get("x-is-test") === "true";
+    const noTests = req.headers.get("x-no-tests") === "true";
+
+    if (!requireTests && !isTest && !noTests) {
+      return new Response(
+        "Testing mode required: X-Require-Tests, X-Is-Test: true, or X-No-Tests: true",
+        { status: 400 },
+      );
+    }
+
+    if (isTest) {
+      // Validate it actually exports a Test class
+      if (!isTestAtom(content)) {
+        return new Response(
+          "X-Is-Test specified but atom does not export a class named Test",
+          { status: 422 },
+        );
+      }
+      // Dep check still applies — imported atoms must be tested
+      const depCheck = checkDepsTested(content);
+      if (depCheck) return depCheck;
+    }
+
     if (requireTests) {
       const testHashes = requireTests.split(",").map((s) => s.trim()).filter(
         Boolean,
@@ -388,8 +411,7 @@ async function route(req: Request): Promise<Response> {
       const fail = await runTests(testHashes, hash);
       if (fail) return fail;
 
-      // Store atom first (tests need it served for the idempotent case,
-      // but we already checked it doesn't exist above)
+      // Store atom
       const gz = await gzipSize(minify(content));
       db.insertAtom(hash, content, gz, description ?? "", goal);
 
@@ -425,7 +447,7 @@ async function route(req: Request): Promise<Response> {
       });
     }
 
-    // No test gate — just store
+    // --is-test or --no-tests: store without running tests
     const gz = await gzipSize(minify(content));
     db.insertAtom(hash, content, gz, description ?? "", goal);
 
