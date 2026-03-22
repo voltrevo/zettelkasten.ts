@@ -10,9 +10,15 @@ corpus exclusively through the zts CLI.
 
 ## Atom rules
 
-1. Exactly one value export (function, class, const, or enum). Named only — no export default.
-   Type-only exports (export type, export interface) do not count.
-2. Only relative atom imports: ../../xx/yy/<21chars>.ts. No npm, no JSR, no URLs.
+1. EXACTLY ONE value export per atom. Only one function, class, const, or enum
+   can be exported. Helpers must not be exported — keep them as local functions.
+   Type-only exports (export type, export interface) are allowed and don't count.
+   No export default.
+2. Only relative atom imports. For a 25-char hash like "abcde...", the import path
+   is ../../ab/cd/e...rest.ts (first 2 chars / next 2 chars / remaining 21 chars).
+   Example: hash "1k1bks5opabqf39499ludtcni" →
+   import { X } from "../../1k/1b/ks5opabqf39499ludtcni.ts";
+   No npm, no JSR, no URLs.
 3. No exported let — use const.
 4. Size limit: 1024 bytes gzipped after minification. The server minifies before
    measuring — removing comments or whitespace will not help. Split into smaller

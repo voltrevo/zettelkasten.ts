@@ -44,8 +44,10 @@ world-readable. Override path with `--config <path>`.
    `export default` is forbidden.
 2. **Type-only exports are allowed** — `export type Foo` and `export interface`
    do not count toward the value export limit.
-3. **Only relative atom imports** — the only valid import path format is
-   `../../xx/yy/<21chars>.ts`. No npm packages, no JSR, no URLs, no bare
+3. **Only relative atom imports** — the only valid import path format is The
+   import path splits the 25-char hash: first 2 chars / next 2 / remaining 21.
+   Example: hash `1k1bks5opabqf39499ludtcni` →
+   `../../1k/1b/ks5opabqf39499ludtcni.ts`. No npm, no JSR, no URLs, no bare
    specifiers.
 4. **No exported `let`** — all exports must be `const` or function/class/enum.
 5. **Size limit** — ≤ 1024 bytes gzipped after minification.
@@ -84,8 +86,9 @@ env            ← auth tokens for systemd
 ```
 
 Hash format: 25-char base36 keccak-256 (first 17 bytes of digest). The full hash
-is `xx` + `yy` + `<21chars>`. Hash prefixes work everywhere — the server
-resolves unambiguous prefixes to full hashes automatically.
+is split as `hash[0:2]` / `hash[2:4]` / `hash[4:]` (2 + 2 + 21 = 25 chars). Hash
+prefixes work everywhere — the server resolves unambiguous prefixes to full
+hashes automatically.
 
 ## Auth
 
@@ -112,9 +115,9 @@ Relationship kinds: `imports`, `tests`, `supersedes`.
 zts post -d "brief description" -t "<test1>,<test2>" /tmp/myatom.ts
 # → 201 if tests pass (relationships auto-registered), 422 if tests fail
 
-# The hash is: xxyy<rest>
-# Reference from another atom:
-import { myFn } from "../../xx/yy/<rest>.ts";
+# The hash is 25 chars. Split into 2/2/21 for the import path:
+# hash "1k1bks5opabqf39499ludtcni" → import from "../../1k/1b/ks5opabqf39499ludtcni.ts"
+import { myFn } from "../../1k/1b/ks5opabqf39499ludtcni.ts";
 ```
 
 Descriptions are required (`-d`). Use `--no-description` to opt out.

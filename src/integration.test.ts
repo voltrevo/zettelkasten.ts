@@ -56,6 +56,7 @@ Deno.test("integration: full workflow", async (t) => {
     dbPath: ":memory:",
     devToken: DEV_TOKEN,
     adminToken: ADMIN_TOKEN,
+    serverUrl: "http://127.0.0.1:0", // updated below after port is known
     checkerUrl: `http://127.0.0.1:${checkerHandle.port}`,
     skipEmbedCheck: true,
   });

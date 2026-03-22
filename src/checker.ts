@@ -62,6 +62,7 @@ async function handleCheck(req: Request): Promise<Response> {
     args: [
       "test",
       `--allow-import=${serverHost}`,
+      `--allow-net=${serverHost}`,
       "--no-lock",
       TEST_RUNNER,
       "--",

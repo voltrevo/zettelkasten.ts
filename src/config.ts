@@ -79,6 +79,18 @@ export function configPath(dataDir: string): string {
 
 export async function initConfig(dataDir: string): Promise<string> {
   const path = configPath(dataDir);
+
+  // Refuse to overwrite existing config
+  try {
+    await Deno.stat(path);
+    console.error(
+      `error: ${path} already exists. Delete it first if you want to regenerate.`,
+    );
+    Deno.exit(1);
+  } catch {
+    // File doesn't exist — proceed
+  }
+
   await Deno.mkdir(dataDir, { recursive: true });
 
   const buf = new Uint8Array(32);

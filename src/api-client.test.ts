@@ -136,7 +136,12 @@ Deno.test("postAtom sends headers and returns hash", async () => {
     assertEquals(path, "/a");
     assertEquals(init?.method, "POST");
     const h = init?.headers as Record<string, string>;
-    assertEquals(h["x-description"], "test desc");
+    assertEquals(h["x-description-encoding"], "base64utf8");
+    // Description is base64-encoded UTF-8
+    const decoded = new TextDecoder().decode(
+      Uint8Array.from(atob(h["x-description"]), (c) => c.charCodeAt(0)),
+    );
+    assertEquals(decoded, "test desc");
     assertEquals(h["x-require-tests"], "t1,t2");
     assertEquals(h["x-goal"], "mygoal");
     assertEquals(h["authorization"], "Bearer admin-tok");

@@ -13,7 +13,7 @@ if [ ! -f "$CONFIG" ]; then
 {
   devToken: "${DEV_TOKEN}",
   adminToken: "${ADMIN_TOKEN}",
-  serverUrl: "http://localhost:7483",
+  serverUrl: "http://zts-server:7483",
   serverPort: 7483,
   checkerPort: 7484,
   checkerUrl: "http://zts-checker:7484",

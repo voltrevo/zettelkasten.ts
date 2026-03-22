@@ -466,6 +466,7 @@ switch (command) {
     if (sub === "run") {
       await serve({
         port: cfg.serverPort,
+        serverUrl: cfg.serverUrl,
         dataDir: cfg.dataDir,
         devToken: cfg.devToken,
         adminToken: cfg.adminToken,

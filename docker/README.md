@@ -62,13 +62,13 @@ Internet
 
 ## Containers
 
-| Container | Purpose | Internet | Volumes |
-|-----------|---------|----------|---------|
-| zts-server | API + web UI | Host access only (port 7483) | `zts-data` (SQLite + config) |
-| zts-checker | Sandboxed test execution | None | None |
-| ollama | Embedding model (nomic-embed-text) | Egress (model pulls) | `ollama-models` |
-| gateway | Squid proxy with allowlist | Yes | None |
-| zts-agent | Agent sandbox (Claude Code + zts) | Via gateway only | `agent-workspace` |
+| Container   | Purpose                            | Internet                     | Volumes                      |
+| ----------- | ---------------------------------- | ---------------------------- | ---------------------------- |
+| zts-server  | API + web UI                       | Host access only (port 7483) | `zts-data` (SQLite + config) |
+| zts-checker | Sandboxed test execution           | None                         | None                         |
+| ollama      | Embedding model (nomic-embed-text) | Egress (model pulls)         | `ollama-models`              |
+| gateway     | Squid proxy with allowlist         | Yes                          | None                         |
+| zts-agent   | Agent sandbox (Claude Code + zts)  | Via gateway only             | `agent-workspace`            |
 
 ## Configuration
 
@@ -82,8 +82,8 @@ access).
 
 ## Web UI
 
-Accessible at http://localhost:7483. Log in with the admin token from the
-server logs.
+Accessible at http://localhost:7483. Log in with the admin token from the server
+logs.
 
 ## Useful Commands
 
@@ -110,8 +110,8 @@ docker compose up -d
 
 ## GPU Support (Ollama)
 
-To enable GPU acceleration for embeddings, add to `docker-compose.yml` under
-the `ollama` service:
+To enable GPU acceleration for embeddings, add to `docker-compose.yml` under the
+`ollama` service:
 
 ```yaml
 deploy:

@@ -36,7 +36,7 @@ services:
       - ollama-models:/root/.ollama
     networks:
       - zts-net
-      - gateway-egress  # needs internet for model pulls
+      - gateway-egress # needs internet for model pulls
     restart: unless-stopped
 
   gateway:

@@ -350,7 +350,16 @@ function buildClient(
 
     async postAtom(source, opts) {
       const headers: Record<string, string> = {};
-      if (opts.description) headers["x-description"] = opts.description;
+      if (opts.description) {
+        // Base64-encode to avoid ByteString errors with non-ASCII chars
+        headers["x-description"] = btoa(
+          new TextEncoder().encode(opts.description).reduce(
+            (s, b) => s + String.fromCharCode(b),
+            "",
+          ),
+        );
+        headers["x-description-encoding"] = "base64utf8";
+      }
       if (opts.allowNoDescription) headers["x-allow-no-description"] = "true";
       if (opts.tests) headers["x-require-tests"] = opts.tests;
       if (opts.isTest) headers["x-is-test"] = "true";

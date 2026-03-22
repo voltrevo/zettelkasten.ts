@@ -22,8 +22,6 @@ import { isTestAtom, validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
 
-import { DEFAULT_SERVER_PORT } from "./config.ts";
-
 let embedConfig = defaultEmbedConfig();
 let embedDim = 768;
 
@@ -59,7 +57,7 @@ async function serveStatic(filePath: string): Promise<Response | null> {
 let db: Db;
 let hnswIndex: HnswIndex;
 let authConfig: AuthConfig;
-let serverPort: number = DEFAULT_SERVER_PORT;
+let serverUrl: string;
 let checkerUrl: string;
 
 async function gzipSize(text: string): Promise<number> {
@@ -79,7 +77,6 @@ async function runTests(
   testHashes: string[],
   targetHash: string,
 ): Promise<Response | null> {
-  const serverUrl = `http://localhost:${serverPort}`;
   const res = await fetch(`${checkerUrl}/check`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -298,7 +295,14 @@ async function route(req: Request): Promise<Response> {
   if (req.method === "POST" && path === "/a") {
     const authErr = requireAuth(req, "dev");
     if (authErr) return authErr;
-    const description = req.headers.get("x-description");
+    let description = req.headers.get("x-description");
+    if (
+      description && req.headers.get("x-description-encoding") === "base64utf8"
+    ) {
+      description = new TextDecoder().decode(
+        Uint8Array.from(atob(description), (c) => c.charCodeAt(0)),
+      );
+    }
     const allowNoDesc = req.headers.get("x-allow-no-description");
     if (!description && !allowNoDesc) {
       return new Response(
@@ -373,12 +377,16 @@ async function route(req: Request): Promise<Response> {
       const depCheck = checkDepsTested(content);
       if (depCheck) return depCheck;
 
-      const fail = await runTests(testHashes, hash);
-      if (fail) return fail;
-
-      // Store atom
+      // Store atom first (test runner imports it from the server)
       const gz = await gzipSize(minify(content));
       db.insertAtom(hash, content, gz, description ?? "", goal);
+
+      const fail = await runTests(testHashes, hash);
+      if (fail) {
+        // Roll back on test failure
+        db.deleteAtom(hash);
+        return fail;
+      }
 
       // Auto-register test relationships + evaluation metadata
       for (const th of testHashes) {
@@ -1375,6 +1383,7 @@ export interface ServerConfig {
   devToken?: string;
   adminToken?: string;
   checkerUrl: string;
+  serverUrl: string;
   skipEmbedCheck?: boolean;
   embedUrl?: string;
   embedModel?: string;
@@ -1387,6 +1396,7 @@ export interface ServerHandle {
 }
 
 export function startServer(config: ServerConfig): ServerHandle {
+  serverUrl = config.serverUrl;
   checkerUrl = config.checkerUrl;
   authConfig = {
     devToken: config.devToken,
@@ -1433,7 +1443,10 @@ export function startServer(config: ServerConfig): ServerHandle {
     hostname: config.hostname ?? "0.0.0.0",
   }, handler);
   const actualPort = (server.addr as Deno.NetAddr).port;
-  serverPort = actualPort;
+  // Update serverUrl with actual port (for port=0 / ephemeral port)
+  if (config.port === 0) {
+    serverUrl = serverUrl.replace(/:0(\/|$)/, `:${actualPort}$1`);
+  }
 
   return {
     port: actualPort,
@@ -1446,6 +1459,7 @@ export function startServer(config: ServerConfig): ServerHandle {
 
 export async function serve(opts: {
   port: number;
+  serverUrl: string;
   dataDir: string;
   devToken: string;
   adminToken: string;
@@ -1469,6 +1483,7 @@ export async function serve(opts: {
     dbPath: `${opts.dataDir}/zts.db`,
     devToken: opts.devToken,
     adminToken: opts.adminToken,
+    serverUrl: opts.serverUrl,
     checkerUrl: opts.checkerUrl,
     embedUrl: opts.embedUrl,
     embedModel: opts.embedModel,
