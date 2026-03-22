@@ -110,18 +110,72 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(goals[0].name, "test-goal");
     });
 
-    await timed(t, "post atom", async () => {
+    await timed(t, "draft atom", async () => {
       const source =
         `// Adds two numbers and returns the sum\nexport function add(a: number, b: number): number { return a + b; }\n`;
-      atomHash = await client.postAtom(source, {
-        description: "Adds two numbers and returns the sum",
-        goal: "test-goal",
-        noTests: true,
-      });
-      log("posted atom:", atomHash);
+      const draftResult = await client.draft(source);
+      atomHash = draftResult.hash;
+      log("drafted atom:", atomHash, "existing:", draftResult.existing);
       assertEquals(atomHash.length, 25);
       assertEquals(/^[a-z0-9]+$/.test(atomHash), true);
+      assertEquals(draftResult.existing, false);
+    });
+
+    await timed(t, "list drafts shows unpublished atom", async () => {
+      const drafts = await client.listDrafts();
+      log("drafts:", drafts.map((d) => d.hash.slice(0, 8) + "…"));
+      assertEquals(drafts.length, 1);
+      assertEquals(drafts[0].hash, atomHash);
+    });
+
+    let addTestHash = "";
+
+    await timed(t, "add test to draft target", async () => {
+      const testSource =
+        `// Tests that add returns the sum of two numbers\nexport class Test {\n  static name = "add: basic addition";\n  run(target: (a: number, b: number) => number): void {\n    if (target(2, 3) !== 5) throw new Error("expected 5");\n  }\n}\n`;
+      const result = await client.addTest(testSource, [atomHash]);
+      addTestHash = result.hash;
+      log("addTest result:", {
+        hash: result.hash,
+        testName: result.testName,
+        results: result.results,
+      });
+      assertEquals(result.hash.length, 25);
+      assertEquals(result.testName, "add: basic addition");
+      assertEquals(result.results.length, 1);
+      assertEquals(result.results[0].target, atomHash);
+      assertEquals(result.results[0].passed, true);
+    }, SUBPROCESS);
+
+    await timed(t, "publish atom with test", async () => {
+      const pubResult = await client.publish(atomHash, {
+        description: "Adds two numbers and returns the sum",
+        goal: "test-goal",
+      });
+      log("published atom:", pubResult.hash);
+      assertEquals(pubResult.hash, atomHash);
     }, EMBED);
+
+    await timed(t, "archive a draft", async () => {
+      const tmpSource =
+        `// Temporary atom for archive test\nexport const TMP = 42;\n`;
+      const draftResult = await client.draft(tmpSource);
+      const tmpHash = draftResult.hash;
+      log("drafted tmp atom:", tmpHash);
+
+      // Verify it shows in drafts
+      const drafts = await client.listDrafts();
+      const found = drafts.some((d) => d.hash === tmpHash);
+      assertEquals(found, true);
+
+      // Archive it
+      await client.archive(tmpHash);
+
+      // Verify it no longer shows in drafts
+      const draftsAfter = await client.listDrafts();
+      const foundAfter = draftsAfter.some((d) => d.hash === tmpHash);
+      assertEquals(foundAfter, false);
+    });
 
     await timed(t, "get atom source", async () => {
       const src = await client.getAtom(atomHash);
@@ -152,8 +206,10 @@ Deno.test("integration: full workflow", async (t) => {
           `${a.hash.slice(0, 8)}… ${a.description.slice(0, 40)}`
         ),
       );
-      assertEquals(atoms.length, 1);
-      assertEquals(atoms[0].hash, atomHash);
+      // atomHash + addTestHash (auto-published with target)
+      assertEquals(atoms.length >= 1, true);
+      const hashes = atoms.map((a) => a.hash);
+      assertEquals(hashes.includes(atomHash), true);
     });
 
     await timed(t, "recent filtered by goal", async () => {
@@ -210,16 +266,20 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(results[0].hash, atomHash);
     });
 
-    await timed(t, "post second atom", async () => {
+    await timed(t, "draft and publish second atom", async () => {
       const source =
         `// The mathematical constant pi\nexport const PI = 3.14159;\n`;
-      atom2Hash = await client.postAtom(source, {
+      const draftResult = await client.draft(source);
+      atom2Hash = draftResult.hash;
+      // Add a simple test
+      const testSrc = `export class Test {\n  static name = "PI is approximately 3.14";\n  run(PI: number): void {\n    if (Math.abs(PI - 3.14159) > 0.001) throw new Error("wrong PI");\n  }\n}\n`;
+      await client.addTest(testSrc, [atom2Hash]);
+      await client.publish(atom2Hash, {
         description: "The mathematical constant pi",
-        noTests: true,
       });
       log("posted atom2:", atom2Hash);
       const atoms = await client.recent({ n: 10 });
-      assertEquals(atoms.length, 2);
+      assertEquals(atoms.length >= 2, true);
     }, EMBED);
 
     await timed(t, "properties: set, list, unset", async () => {
@@ -319,19 +379,19 @@ Deno.test("integration: full workflow", async (t) => {
     });
 
     await timed(t, "prompts: get, set, reset", async () => {
-      const def = await client.getPrompt("context");
+      const def = await client.getPrompt("prompt");
       log("default prompt source:", def.source, "length:", def.text.length);
       assertEquals(def.source, "default");
       assertEquals(def.text.length > 0, true);
 
-      await client.setPrompt("context", "custom prompt");
-      const over = await client.getPrompt("context");
+      await client.setPrompt("prompt", "custom prompt");
+      const over = await client.getPrompt("prompt");
       log("override prompt source:", over.source, "text:", over.text);
       assertEquals(over.source, "override");
       assertEquals(over.text, "custom prompt");
 
-      await client.resetPrompt("context");
-      const reset = await client.getPrompt("context");
+      await client.resetPrompt("prompt");
+      const reset = await client.getPrompt("prompt");
       log("after reset source:", reset.source);
       assertEquals(reset.source, "default");
     });
@@ -345,11 +405,19 @@ Deno.test("integration: full workflow", async (t) => {
         [...new Set(logs.map((l) => l.op))].join(", "),
       );
       assertEquals(logs.length > 0, true);
-      const createLogs = logs.filter((l) => l.op === "atom.create");
-      assertEquals(createLogs.length, 2);
+      const draftLogs = logs.filter((l) => l.op === "atom.draft");
+      assertEquals(draftLogs.length >= 1, true);
+      const publishLogs = logs.filter((l) => l.op === "atom.publish");
+      assertEquals(publishLogs.length >= 1, true);
     });
 
     await timed(t, "delete atom", async () => {
+      // Remove test relationships first
+      const testRels = await client.queryRelationships({ to: atom2Hash, kind: "tests" });
+      for (const rel of testRels) {
+        await client.removeRelationship(rel.from, "tests", atom2Hash);
+        try { await client.deleteAtom(rel.from); } catch { /* may have other rels */ }
+      }
       await client.deleteAtom(atom2Hash);
       await assertRejects(
         () => client.getAtom(atom2Hash),
@@ -359,7 +427,8 @@ Deno.test("integration: full workflow", async (t) => {
 
     await timed(t, "status reflects changes", async () => {
       const s = await client.getStatus();
-      assertEquals(s.totalAtoms, 1);
+      // atomHash + addTestHash remain (atom2Hash deleted)
+      assertEquals(s.totalAtoms >= 2, true);
     });
 
     await timed(t, "hash prefix resolution", async () => {
@@ -376,11 +445,7 @@ Deno.test("integration: full workflow", async (t) => {
 
     await timed(t, "unauthed writes rejected", async () => {
       await assertRejects(
-        () =>
-          unauthClient.postAtom("export const x = 1;\n", {
-            description: "test",
-            noTests: true,
-          }),
+        () => unauthClient.draft("export const x = 1;\n"),
         ApiError,
       );
     });
@@ -415,29 +480,42 @@ Deno.test("integration: full workflow", async (t) => {
       );
     });
 
-    // ---- Idempotent post ----
+    // ---- Idempotent draft ----
 
-    await timed(t, "idempotent post returns same hash", async () => {
+    await timed(t, "draft of already-published content returns 409", async () => {
       const source =
         `// Adds two numbers and returns the sum\nexport function add(a: number, b: number): number { return a + b; }\n`;
-      const hash2 = await client.postAtom(source, {
-        description: "Adds two numbers and returns the sum",
-        noTests: true,
-      });
-      assertEquals(hash2, atomHash);
+      await assertRejects(
+        () => client.draft(source),
+        ApiError,
+      );
+    });
+
+    await timed(t, "idempotent draft of same draft content", async () => {
+      const source = `// Temp atom\nexport const temp = 42;\n`;
+      const first = await client.draft(source);
+      const second = await client.draft(source);
+      assertEquals(second.hash, first.hash);
+      assertEquals(second.existing, true);
+      // Clean up
+      await client.archive(first.hash);
     });
 
     // ---- Multi-atom dependency tree ----
 
     let depAtomHash = "";
 
-    await timed(t, "post atom that imports another", async () => {
+    await timed(t, "draft and publish atom that imports another", async () => {
       const source = `// Doubles using add\nimport { add } from "${
         importPath(atomHash)
       }";\nexport function double(n: number): number { return add(n, n); }\n`;
-      depAtomHash = await client.postAtom(source, {
+      const draftResult = await client.draft(source);
+      depAtomHash = draftResult.hash;
+      // Add a test for the double function
+      const testSrc = `export class Test {\n  static name = "double(5) returns 10";\n  run(double: (n: number) => number): void {\n    if (double(5) !== 10) throw new Error("expected 10");\n  }\n}\n`;
+      await client.addTest(testSrc, [depAtomHash]);
+      await client.publish(depAtomHash, {
         description: "Doubles a number using add",
-        noTests: true,
       });
       log("posted dep atom:", depAtomHash, "imports:", atomHash);
       assertEquals(depAtomHash.length, 25);
@@ -481,7 +559,14 @@ Deno.test("integration: full workflow", async (t) => {
     });
 
     await timed(t, "delete succeeds after removing relationship", async () => {
+      // Remove import relationship
       await client.removeRelationship(depAtomHash, "imports", atomHash);
+      // Remove test relationships
+      const testRels = await client.queryRelationships({ to: depAtomHash, kind: "tests" });
+      for (const rel of testRels) {
+        await client.removeRelationship(rel.from, "tests", depAtomHash);
+        try { await client.deleteAtom(rel.from); } catch { /* may have other rels */ }
+      }
       await client.deleteAtom(depAtomHash);
       await assertRejects(() => client.getAtom(depAtomHash), ApiError);
     });
@@ -492,19 +577,34 @@ Deno.test("integration: full workflow", async (t) => {
     let chainB = "";
     let chainC = "";
 
-    await timed(t, "supersedes chain: A <- B <- C", async () => {
-      chainA = await client.postAtom(
+    await timed(t, "supersedes chain: A <- B <- C", async () => { // 3 draft+test+publish cycles
+      // Helper: draft a const, add test, publish
+      async function draftTestPublish(
+        src: string,
+        testSrc: string,
+        desc: string,
+      ): Promise<string> {
+        const d = await client.draft(src);
+        await client.addTest(testSrc, [d.hash]);
+        await client.publish(d.hash, { description: desc });
+        return d.hash;
+      }
+      chainA = await draftTestPublish(
         `// Chain A\nexport const A = 1;\n`,
-        { allowNoDescription: true, noTests: true },
+        `export class Test {\n  static name = "A is 1";\n  run(A: number): void { if (A !== 1) throw new Error("wrong"); }\n}\n`,
+        "Chain constant A",
       );
-      chainB = await client.postAtom(
+      chainB = await draftTestPublish(
         `// Chain B\nexport const B = 2;\n`,
-        { allowNoDescription: true, noTests: true },
+        `export class Test {\n  static name = "B is 2";\n  run(B: number): void { if (B !== 2) throw new Error("wrong"); }\n}\n`,
+        "Chain constant B",
       );
-      chainC = await client.postAtom(
+      chainC = await draftTestPublish(
         `// Chain C\nexport const C = 3;\n`,
-        { allowNoDescription: true, noTests: true },
+        `export class Test {\n  static name = "C is 3";\n  run(C: number): void { if (C !== 3) throw new Error("wrong"); }\n}\n`,
+        "Chain constant C",
       );
+
       log(
         `chain: ${chainA.slice(0, 8)}… <- ${chainB.slice(0, 8)}… <- ${
           chainC.slice(0, 8)
@@ -512,7 +612,7 @@ Deno.test("integration: full workflow", async (t) => {
       );
       await client.addRelationship(chainB, "supersedes", chainA);
       await client.addRelationship(chainC, "supersedes", chainB);
-    });
+    }, SUBPROCESS);
 
     await timed(t, "tops traverses supersedes chain", async () => {
       const tops = await client.tops(chainA);
@@ -662,8 +762,8 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Prompt edge cases ----
 
-    await timed(t, "get all three default prompts", async () => {
-      for (const name of ["context", "iteration", "retrospective"]) {
+    await timed(t, "get all default prompts", async () => {
+      for (const name of ["prompt", "retrospective"]) {
         const p = await client.getPrompt(name);
         assertEquals(p.source, "default");
         assertEquals(p.text.length > 0, true);
@@ -671,8 +771,8 @@ Deno.test("integration: full workflow", async (t) => {
     });
 
     await timed(t, "get default-only ignores override", async () => {
-      await client.setPrompt("iteration", "override text");
-      const def = await client.getPrompt("iteration", true);
+      await client.setPrompt("prompt", "override text");
+      const def = await client.getPrompt("prompt", true);
       log(
         "default-only source:",
         def.source,
@@ -682,7 +782,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(def.source, "default");
       assertEquals(def.text.includes("override text"), false);
 
-      const over = await client.getPrompt("iteration");
+      const over = await client.getPrompt("prompt");
       log(
         "active prompt source:",
         over.source,
@@ -692,7 +792,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(over.source, "override");
       assertEquals(over.text, "override text");
 
-      await client.resetPrompt("iteration");
+      await client.resetPrompt("prompt");
     });
 
     // ---- Delete nonexistent atom ----
@@ -745,11 +845,20 @@ Deno.test("integration: full workflow", async (t) => {
       t,
       "cleanup: remove chain relationships and atoms",
       async () => {
+        // Remove supersedes relationships
         await client.removeRelationship(chainC, "supersedes", chainB);
         await client.removeRelationship(chainB, "supersedes", chainA);
-        await client.deleteAtom(chainC);
-        await client.deleteAtom(chainB);
-        await client.deleteAtom(chainA);
+        // Remove test relationships and test atoms for each chain atom
+        for (const hash of [chainC, chainB, chainA]) {
+          const rels = await client.queryRelationships({ to: hash, kind: "tests" });
+          for (const rel of rels) {
+            await client.removeRelationship(rel.from, "tests", hash);
+            try {
+              await client.deleteAtom(rel.from);
+            } catch { /* may have other relationships */ }
+          }
+          await client.deleteAtom(hash);
+        }
       },
     );
 

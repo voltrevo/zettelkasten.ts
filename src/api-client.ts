@@ -16,6 +16,7 @@ export interface AtomSummary {
   gzipSize: number;
   description: string;
   goal: string | null;
+  status: "draft" | "published";
   createdAt: string;
 }
 
@@ -142,16 +143,27 @@ export interface GoalComment {
   createdAt: string;
 }
 
-// ---- Request option types ----
+// ---- Draft/Publish result types ----
 
-export interface PostAtomOpts {
-  description?: string;
-  tests?: string;
-  goal?: string;
-  isTest?: boolean;
-  noTests?: boolean;
-  allowNoDescription?: boolean;
+export interface DraftResult {
+  hash: string;
+  url: string;
+  existing: boolean;
 }
+
+export interface AddTestResult {
+  hash: string;
+  testName: string | null;
+  results: { target: string; passed: boolean; error?: string }[];
+}
+
+export interface PublishResult {
+  hash: string;
+  url: string;
+  autoPublished: string[];
+}
+
+// ---- Request option types ----
 
 export interface RecentOpts {
   n?: number;
@@ -181,7 +193,17 @@ export class ApiError extends Error {
 export interface ZtsClient {
   // Atoms
   getAtom(hash: string): Promise<string>;
-  postAtom(source: string, opts: PostAtomOpts): Promise<string>;
+  draft(source: string): Promise<DraftResult>;
+  addTest(
+    source: string,
+    targets: string[],
+  ): Promise<AddTestResult>;
+  publish(
+    hash: string,
+    opts: { description: string; goal?: string },
+  ): Promise<PublishResult>;
+  archive(hash: string): Promise<void>;
+  listDrafts(): Promise<AtomSummary[]>;
   deleteAtom(hash: string): Promise<void>;
   describeRead(hash: string): Promise<string>;
   describeUpdate(hash: string, description: string): Promise<void>;
@@ -348,34 +370,39 @@ function buildClient(
       return info.source;
     },
 
-    async postAtom(source, opts) {
+    draft: (source) =>
+      json("/draft", {
+        method: "POST",
+        body: source,
+      }),
+
+    addTest: (source, targets) =>
+      json("/add-test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source, targets }),
+      }),
+
+    async publish(hash, pubOpts) {
       const headers: Record<string, string> = {};
-      if (opts.description) {
-        // Base64-encode to avoid ByteString errors with non-ASCII chars
-        headers["x-description"] = btoa(
-          new TextEncoder().encode(opts.description).reduce(
-            (s, b) => s + String.fromCharCode(b),
-            "",
-          ),
-        );
-        headers["x-description-encoding"] = "base64utf8";
-      }
-      if (opts.allowNoDescription) headers["x-allow-no-description"] = "true";
-      if (opts.tests) headers["x-require-tests"] = opts.tests;
-      if (opts.isTest) headers["x-is-test"] = "true";
-      if (opts.noTests) headers["x-no-tests"] = "true";
-      if (opts.goal) headers["x-goal"] = opts.goal;
-      const urlPath = (await text("/a", {
+      // Base64-encode description to avoid ByteString errors
+      headers["x-description"] = btoa(
+        new TextEncoder().encode(pubOpts.description).reduce(
+          (s, b) => s + String.fromCharCode(b),
+          "",
+        ),
+      );
+      headers["x-description-encoding"] = "base64utf8";
+      if (pubOpts.goal) headers["x-goal"] = pubOpts.goal;
+      return json(`/publish/${hash}`, {
         method: "POST",
         headers,
-        body: source,
-      })).trim();
-      // Server returns /a/xx/yy/rest.ts — extract hash
-      const m = urlPath.match(
-        /\/a\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+)\.ts/,
-      );
-      return m ? m[1] + m[2] + m[3] : urlPath;
+      });
     },
+
+    archive: (hash) => ok(`/archive/${hash}`, { method: "POST" }),
+
+    listDrafts: () => json("/drafts"),
 
     deleteAtom: (hash) => ok(`/a/${hash}`, { method: "DELETE" }),
 

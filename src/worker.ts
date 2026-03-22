@@ -1,6 +1,6 @@
 /**
  * Agent loop worker. Manages the iteration lifecycle:
- * handover promotion, prompt assembly, agent invocation, output capture.
+ * Summary promotion, prompt assembly, agent invocation, output capture.
  */
 
 const RETROSPECTIVE_INTERVAL = 30;
@@ -16,8 +16,7 @@ export interface WorkerConfig {
   devToken: string;
   model?: string; // agent model (e.g. "sonnet", "opus")
   // Override prompt files (read from disk instead of server)
-  contextPromptFile?: string;
-  iterationPromptFile?: string;
+  promptFile?: string;
   retrospectivePromptFile?: string;
 }
 
@@ -40,7 +39,7 @@ export async function setupWorkspace(config: WorkerConfig): Promise<void> {
   }
 
   // Create structure
-  await Deno.mkdir(`${dir}/handovers/history`, { recursive: true });
+  await Deno.mkdir(`${dir}/summary/history`, { recursive: true });
   await Deno.mkdir(`${dir}/notes`, { recursive: true });
   await Deno.mkdir(`${dir}/retrospectives`, { recursive: true });
   await Deno.mkdir(`${dir}/logs`, { recursive: true });
@@ -50,11 +49,8 @@ export async function setupWorkspace(config: WorkerConfig): Promise<void> {
   await Deno.writeTextFile(`${dir}/.iteration`, "0");
 
   await Deno.writeTextFile(
-    `${dir}/handovers/current.md`,
-    `# Handover — first run
-
-This is the first iteration for channel "${config.channel}".
-No prior context exists. Pick a goal and start building.
+    `${dir}/summary/current.md`,
+    `First iteration for channel "${config.channel}". No prior context.
 `,
   );
 
@@ -68,7 +64,7 @@ carrying forward across iterations.
   );
 
   console.log(`Created workspace: ${dir}/`);
-  console.log("  handovers/current.md");
+  console.log("  summary/current.md");
   console.log("  notes/current.md");
   console.log("  retrospectives/");
   console.log("  logs/");
@@ -184,7 +180,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
 
   // Verify workspace exists
   try {
-    await Deno.stat(`${dir}/handovers/current.md`);
+    await Deno.stat(`${dir}/summary/current.md`);
   } catch {
     console.error(
       `error: workspace not found at ${dir}. Run: zts worker setup --channel ${config.channel}`,
@@ -231,42 +227,38 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
 
       console.log(`[iter ${iter}] ${mode}`);
 
-      // Fetch prompts
-      const contextPrompt = await getPrompt(
-        "context",
-        config.contextPromptFile,
-        config.serverUrl,
-      );
-      const modePrompt = await getPrompt(
-        isRetrospective ? "retrospective" : "iteration",
+      // Fetch prompt
+      const rawPrompt = await getPrompt(
+        isRetrospective ? "retrospective" : "prompt",
         isRetrospective
           ? config.retrospectivePromptFile
-          : config.iterationPromptFile,
+          : config.promptFile,
         config.serverUrl,
       );
 
-      // Read handover
-      let handover = "";
+      // Read summary
+      let summary = "";
       try {
-        handover = await Deno.readTextFile(`${dir}/handovers/current.md`);
+        summary = await Deno.readTextFile(`${dir}/summary/current.md`);
       } catch { /* first run or missing */ }
 
-      // Assemble prompt
+      // Expand template variables
       const iterPad = String(iter).padStart(4, "0");
-      let prompt = contextPrompt + "\n\n---\n\n" + modePrompt +
-        `\n\nCurrent iteration: ${iter}\nChannel: ${config.channel}\n`;
+      let prompt = rawPrompt
+        .replace(/\{\{server-url\}\}/g, config.serverUrl)
+        .replace(/\{\{summary\}\}/g, summary || "(First iteration — no previous summary.)")
+        .replace(/\{\{goal\}\}/g, "(Goal will be selected by the agent via zts goal pick)");
+      // {{cli-help}} is expanded lazily — TODO: capture zts -h output
+      prompt += `\n\nCurrent iteration: ${iter}\nChannel: ${config.channel}\n`;
       if (isRetrospective) {
         prompt +=
           `Write your retrospective to: retrospectives/retro-${iterPad}.md\n`;
       }
-      prompt +=
-        `\n---\n\n# Incoming handover (written by previous iteration — this is your starting context, not your output)\n\n` +
-        handover;
 
       // Add context for retrospective mode
       if (isRetrospective) {
-        // Include recent handover history so the agent doesn't waste turns reading files
-        const historyDir = `${dir}/handovers/history`;
+        // Include recent summary history so the agent doesn't waste turns reading files
+        const historyDir = `${dir}/summary/history`;
         const historyFiles: string[] = [];
         try {
           for await (const entry of Deno.readDir(historyDir)) {
@@ -278,10 +270,10 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
           const nb = parseInt(b);
           return na - nb;
         });
-        // Include last 30 handovers
+        // Include last 30 summaries
         const recentHistory = historyFiles.slice(-30);
         if (recentHistory.length > 0) {
-          prompt += "\n\n---\n\n# Recent handover history\n\n";
+          prompt += "\n\n---\n\n# Recent summary history\n\n";
           for (const f of recentHistory) {
             const content = await Deno.readTextFile(`${historyDir}/${f}`);
             prompt += `--- iteration ${
@@ -297,17 +289,17 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         }
       }
 
-      // Snapshot current handover to history
-      if (handover) {
+      // Snapshot current summary to history
+      if (summary) {
         await Deno.writeTextFile(
-          `${dir}/handovers/history/${iter}.md`,
-          handover,
+          `${dir}/summary/history/${iter}.md`,
+          summary,
         );
       }
 
       // Remove next.md so we can detect if agent wrote it
       try {
-        await Deno.remove(`${dir}/handovers/next.md`);
+        await Deno.remove(`${dir}/summary/next.md`);
       } catch { /* didn't exist */ }
 
       // Create log dir for this iteration
@@ -344,7 +336,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       const agentEnv = {
         ...Deno.env.toObject(),
         ZTS_CHANNEL: config.channel,
-        ZTS_HANDOVER_DIR: `${dir}/handovers`,
+        ZTS_SUMMARY_DIR: `${dir}/summary`,
         ZTS_SERVER_URL: config.serverUrl,
         ZTS_DEV_TOKEN: config.devToken,
       };
@@ -401,14 +393,14 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         `[iter ${iter}] exit ${code} (${durationSec}s)`,
       );
 
-      // Promote handover
+      // Promote summary
       try {
-        const next = await Deno.readTextFile(`${dir}/handovers/next.md`);
-        await Deno.writeTextFile(`${dir}/handovers/current.md`, next);
-        await Deno.remove(`${dir}/handovers/next.md`);
+        const next = await Deno.readTextFile(`${dir}/summary/next.md`);
+        await Deno.writeTextFile(`${dir}/summary/current.md`, next);
+        await Deno.remove(`${dir}/summary/next.md`);
       } catch {
         console.warn(
-          `[iter ${iter}] WARNING: agent did not write handovers/next.md`,
+          `[iter ${iter}] WARNING: agent did not write summary/next.md`,
         );
       }
 

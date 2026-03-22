@@ -131,28 +131,39 @@ Deno.test("getAtom throws ApiError on 404", async () => {
   );
 });
 
-Deno.test("postAtom sends headers and returns hash", async () => {
+Deno.test("draft sends POST and returns result", async () => {
   const client = mockClient((path, init) => {
-    assertEquals(path, "/a");
+    assertEquals(path, "/draft");
+    assertEquals(init?.method, "POST");
+    return jsonResponse({
+      hash: "abc1234567890abcdefghijkl",
+      url: "/a/ab/c1/234567890abcdefghijkl.ts",
+      existing: false,
+    });
+  });
+  const result = await client.draft("export const x = 1;");
+  assertEquals(result.hash, "abc1234567890abcdefghijkl");
+  assertEquals(result.existing, false);
+});
+
+Deno.test("publish sends description header", async () => {
+  const client = mockClient((path, init) => {
+    assertEquals(path, "/publish/abc1234567890abcdefghijkl");
     assertEquals(init?.method, "POST");
     const h = init?.headers as Record<string, string>;
     assertEquals(h["x-description-encoding"], "base64utf8");
-    // Description is base64-encoded UTF-8
-    const decoded = new TextDecoder().decode(
-      Uint8Array.from(atob(h["x-description"]), (c) => c.charCodeAt(0)),
-    );
-    assertEquals(decoded, "test desc");
-    assertEquals(h["x-require-tests"], "t1,t2");
     assertEquals(h["x-goal"], "mygoal");
-    assertEquals(h["authorization"], "Bearer admin-tok");
-    return textResponse("/a/ab/c1/234567890abcdefghijkl.ts\n");
+    return jsonResponse({
+      hash: "abc1234567890abcdefghijkl",
+      url: "/a/ab/c1/234567890abcdefghijkl.ts",
+      autoPublished: [],
+    });
   });
-  const hash = await client.postAtom("export const x = 1;", {
+  const result = await client.publish("abc1234567890abcdefghijkl", {
     description: "test desc",
-    tests: "t1,t2",
     goal: "mygoal",
   });
-  assertEquals(hash, "abc1234567890abcdefghijkl");
+  assertEquals(result.hash, "abc1234567890abcdefghijkl");
 });
 
 Deno.test("deleteAtom sends DELETE", async () => {

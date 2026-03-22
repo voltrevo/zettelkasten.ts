@@ -51,15 +51,13 @@ const args = parseArgs(Deno.args, {
     "max-turns",
     "max-iters",
     "model",
-    "context-prompt",
-    "iteration-prompt",
+    "targets",
+    "prompt-file",
     "retrospective-prompt",
   ],
   boolean: [
     "f",
     "no-description",
-    "no-tests",
-    "is-test",
     "broken",
     "all",
     "done",
@@ -153,18 +151,28 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   get: `zts get <hash>
   Retrieve and print atom source code. Hash prefixes accepted.`,
 
-  post: `zts post -d <description> -t <test-hashes> [-g <goal>] <file>
-  zts post -d <description> --is-test <file>
-  zts post -d <description> --no-tests <file>
+  draft: `zts draft <file>
+  Upload an atom as a draft. Validates structure, lint, and size.
+  Returns the content hash. Drafts are served over HTTP for exploration.`,
 
-  Store a new atom. One testing mode is required:
-  -t <hash,hash,...> run these tests before storing (deps must also be tested)
-  --is-test          this atom is a test (must export class Test; deps must be tested)
-  --no-tests         skip all testing (discouraged — creates untested debt)
+  "add-test": `zts add-test <file> --targets <hash1>,<hash2>,...
+  Upload a test atom and run it against targets immediately.
+  Works with both draft and published targets.`,
 
-  -d <desc>          description (required unless --no-description)
-  -g <goal>          tag atom with a goal
-  --no-description   skip description requirement`,
+  publish: `zts publish <hash> -d <description> [-g <goal>]
+  Promote a draft to a published atom. Requires:
+  - All imported atoms to be published
+  - At least one test (unless it's a test atom itself)
+  Associated test drafts are auto-published.
+  -d <desc>   description (required, ASCII only)
+  -g <goal>   tag with a goal`,
+
+  archive: `zts archive <hash>
+  Archive a draft. Cascades to orphaned test drafts.
+  Unarchived drafts are cleaned up automatically after a day.`,
+
+  drafts: `zts drafts
+  List current draft atoms.`,
 
   exec: `zts exec <hash|file.zip> [args...]
   Execute an atom's main(globalThis) in an isolated Deno subprocess.
@@ -194,7 +202,7 @@ zts search --code <query> [-k N]
   Run all applicable tests (expected_outcome=pass) for an atom.`,
 
   delete: `zts delete <hash>
-  Delete an orphan atom (no relationships). Returns 409 if atom has relationships.`,
+  Delete an orphan atom (admin only). Returns 409 if atom has relationships.`,
 
   recent: `zts recent [-n N] [--goal G] [--broken] [--prop K] [--all]
   Show recent atoms (default 20).
@@ -279,7 +287,7 @@ zts admin goal delete <name>
   Corpus health summary: total atoms, defects, superseded, recent activity,
   per-goal stats. Default window: last 7 days.`,
 
-  "show-prompt": `zts show-prompt <context|iteration|retrospective>
+  "show-prompt": `zts show-prompt <prompt|retrospective>
   Print the active agent prompt. Shows DB override if one exists,
   otherwise the compiled default.`,
 
@@ -523,8 +531,24 @@ switch (command) {
     await cmdGet(rest);
     break;
 
-  case "post":
-    await cmdPost(rest);
+  case "draft":
+    await cmdDraft(rest);
+    break;
+
+  case "add-test":
+    await cmdAddTest(rest);
+    break;
+
+  case "publish":
+    await cmdPublish(rest);
+    break;
+
+  case "archive":
+    await cmdArchive(rest);
+    break;
+
+  case "drafts":
+    await cmdDrafts();
     break;
 
   case "exec":
@@ -659,16 +683,17 @@ switch (command) {
     console.error(`usage: zts <command> [options]
 
 Corpus:
-  post -d <desc> -t <tests> [-g <goal>] <file>
-                               store atom with tests
-  post -d <desc> --is-test <file>
-                               store test atom (validates Test export)
-  post -d <desc> --no-tests <file>
-                               store without testing (discouraged)
+  draft <file>                 upload atom as draft
+  add-test <file> --targets <h1>,<h2>
+                               add test, run immediately
+  publish <hash> -d <desc> [-g <goal>]
+                               promote draft to published
+  archive <hash>               archive a draft
+  drafts                       list current drafts
   get <hash>                   retrieve source
-  delete <hash>                delete orphan atom
+  delete <hash>                delete orphan atom (admin only)
   recent [-n N] [--goal G] [--broken] [--all]
-                               recent atoms (default 20)
+                               recent published atoms (default 20)
   info <hash>                  source, description, relationships, properties
   describe <hash> [-d <text>]  read or update description
   search <query> [-k N]        semantic search on descriptions
@@ -682,7 +707,7 @@ Relationships:
   rels [--from H] [--to H] [--kind K]
                                query relationships
   dependents <hash>            atoms that import this one
-  relate <from> <kind> <to>    add relationship (e.g. A tests B)
+  relate <from> <kind> <to>    add relationship (e.g. A supersedes B)
   unrelate <from> <kind> <to>  remove relationship
   tops <hash> [--limit N] [--all]
                                navigate supersedes graph to best
@@ -722,7 +747,7 @@ Status & logs:
   status [--since YYYY-MM-DD]  corpus health summary
   log [--recent N] [--op X] [--subject X]
                                query audit log
-  show-prompt <name>           show agent prompt (context/iteration/retrospective)
+  show-prompt <name>           show agent prompt (prompt/retrospective)
 
 Agent loop:
   worker setup                 create workspace for a channel
@@ -838,51 +863,106 @@ async function cmdGet(rest: string[]): Promise<void> {
   }
 }
 
-async function cmdPost(rest: string[]): Promise<void> {
-  const description = args.d;
-  const noDescription = args["no-description"];
-  const noTests = args["no-tests"];
-  const isTest = args["is-test"];
-  if (!description && !noDescription) {
-    console.error(
-      "usage: zts post -d <description> -t <tests> [-g <goal>] <file>",
-    );
-    console.error("       zts post -d <description> --is-test <file>");
-    console.error("       zts post -d <description> --no-tests <file>");
-    Deno.exit(1);
-  }
-  if (!args.t && !isTest && !noTests) {
-    console.error(
-      "error: testing mode required. Use -t <tests>, --is-test, or --no-tests.",
-    );
-    Deno.exit(1);
-  }
+async function cmdDraft(rest: string[]): Promise<void> {
   const file = rest[0];
-  const content = file
-    ? await Deno.readTextFile(file)
-    : new TextDecoder().decode(await readAll(Deno.stdin.readable));
-
-  if (!content) {
-    console.error("error: empty content");
+  if (!file) {
+    console.error("usage: zts draft <file>");
     Deno.exit(1);
   }
-
+  const content = await Deno.readTextFile(file);
   try {
-    const hash = await client.postAtom(content, {
-      description: description || undefined,
-      allowNoDescription: !description ? true : undefined,
-      tests: args.t || undefined,
-      isTest: isTest || undefined,
-      noTests: noTests || undefined,
-      goal: args.g || undefined,
-    });
-    console.log(hash);
+    const result = await client.draft(content);
+    console.log(result.hash);
+    if (result.existing) console.error("(existing draft)");
   } catch (e) {
     if (e instanceof ApiError) {
       console.error(`error: ${e.status} ${e.message}`);
       Deno.exit(1);
     }
     throw e;
+  }
+}
+
+async function cmdAddTest(rest: string[]): Promise<void> {
+  const file = rest[0];
+  const targets = args.targets ?? args.t;
+  if (!file || !targets) {
+    console.error("usage: zts add-test <file> --targets <hash1>,<hash2>");
+    Deno.exit(1);
+  }
+  const content = await Deno.readTextFile(file);
+  const targetList = targets.split(",").map((s: string) => s.trim()).filter(
+    Boolean,
+  );
+  try {
+    const result = await client.addTest(content, targetList);
+    console.log(result.hash);
+    if (result.testName) console.log(`  ${result.testName}`);
+    for (const r of result.results) {
+      console.log(`  ${r.target}: ${r.passed ? "PASS" : "FAIL"}`);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
+  }
+}
+
+async function cmdPublish(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  const description = args.d;
+  if (!hash || !description) {
+    console.error('usage: zts publish <hash> -d "<description>" [-g <goal>]');
+    Deno.exit(1);
+  }
+  try {
+    const result = await client.publish(hash, {
+      description,
+      goal: args.g || undefined,
+    });
+    console.log(result.hash);
+    if (result.autoPublished.length > 0) {
+      console.log(
+        `  auto-published ${result.autoPublished.length} test(s)`,
+      );
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
+  }
+}
+
+async function cmdArchive(rest: string[]): Promise<void> {
+  const hash = rest[0];
+  if (!hash) {
+    console.error("usage: zts archive <hash>");
+    Deno.exit(1);
+  }
+  try {
+    await client.archive(hash);
+    console.log("archived");
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
+  }
+}
+
+async function cmdDrafts(): Promise<void> {
+  const drafts = await client.listDrafts();
+  if (drafts.length === 0) {
+    console.log("no drafts");
+    return;
+  }
+  for (const d of drafts) {
+    console.log(`${d.hash}  ${d.createdAt}  ${d.description || "(no description)"}`);
   }
 }
 
@@ -1480,8 +1560,7 @@ function workerConfig(): WorkerConfig {
     model: args.model,
     serverUrl: cfg.serverUrl,
     devToken: cfg.devToken,
-    contextPromptFile: args["context-prompt"],
-    iterationPromptFile: args["iteration-prompt"],
+    promptFile: args["prompt-file"],
     retrospectivePromptFile: args["retrospective-prompt"],
   };
 }
@@ -1548,7 +1627,7 @@ async function cmdShowPrompt(rest: string[]): Promise<void> {
   const name = rest[0];
   if (!name || !["context", "iteration", "retrospective"].includes(name)) {
     console.error(
-      "usage: zts show-prompt <context|iteration|retrospective>",
+      "usage: zts show-prompt <prompt|retrospective>",
     );
     Deno.exit(1);
   }

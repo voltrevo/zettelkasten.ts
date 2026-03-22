@@ -76,13 +76,18 @@ async function handleCheck(req: Request): Promise<Response> {
 
   let output: Deno.CommandOutput;
   try {
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
         () => reject(new Error(`Test timed out after ${PROCESS_TIMEOUT_MS}ms`)),
         PROCESS_TIMEOUT_MS,
-      )
-    );
-    output = await Promise.race([proc.output(), timeout]);
+      );
+    });
+    try {
+      output = await Promise.race([proc.output(), timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
   } catch (e) {
     const durationMs = Math.round(performance.now() - start);
     const result: CheckResult = {
@@ -143,6 +148,23 @@ async function handleLint(req: Request): Promise<Response> {
   }
 }
 
+async function handleValidateTest(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+  const source = await req.text();
+  if (!source) {
+    return new Response("Empty source", { status: 400 });
+  }
+  const { isTestAtom, extractTestName } = await import("./validate.ts");
+  const valid = isTestAtom(source);
+  const testName = valid ? extractTestName(source) : null;
+  return new Response(
+    JSON.stringify({ valid, testName, diagnostics: valid ? "" : "Not a valid test atom: must export a class named Test" }),
+    { headers: { "content-type": "application/json" } },
+  );
+}
+
 function handler(req: Request): Promise<Response> | Response {
   const url = new URL(req.url);
   if (url.pathname === "/health") {
@@ -155,6 +177,9 @@ function handler(req: Request): Promise<Response> | Response {
   }
   if (url.pathname === "/lint") {
     return handleLint(req);
+  }
+  if (url.pathname === "/validate-test") {
+    return handleValidateTest(req);
   }
   return new Response("Not found", { status: 404 });
 }

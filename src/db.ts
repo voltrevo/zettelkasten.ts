@@ -1,6 +1,6 @@
 import { Database } from "@db/sqlite";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -29,7 +29,19 @@ CREATE TABLE IF NOT EXISTS atoms (
   gzip_size   INTEGER NOT NULL,
   description TEXT NOT NULL,
   goal        TEXT REFERENCES goals(name),
+  status      TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft', 'published')),
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS archive (
+  hash        TEXT PRIMARY KEY,
+  source      TEXT NOT NULL,
+  gzip_size   INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  goal        TEXT,
+  status      TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  archived_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS embeddings (
@@ -83,12 +95,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS atoms_fts USING fts5(
 );
 
 -- Triggers to keep FTS in sync
-CREATE TRIGGER IF NOT EXISTS atoms_fts_insert AFTER INSERT ON atoms BEGIN
+CREATE TRIGGER IF NOT EXISTS atoms_fts_insert AFTER INSERT ON atoms
+WHEN NEW.status = 'published'
+BEGIN
   INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
 END;
 
 CREATE TRIGGER IF NOT EXISTS atoms_fts_delete AFTER DELETE ON atoms BEGIN
   INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
+END;
+
+CREATE TRIGGER IF NOT EXISTS atoms_fts_publish AFTER UPDATE OF status ON atoms
+WHEN NEW.status = 'published' AND OLD.status = 'draft'
+BEGIN
+  INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
 END;
 
 CREATE TABLE IF NOT EXISTS prompts (
@@ -113,6 +133,7 @@ export interface Atom {
   gzipSize: number;
   description: string;
   goal: string | null;
+  status: "draft" | "published";
   createdAt: string;
 }
 
@@ -255,6 +276,47 @@ export class Db {
       this.db.prepare("UPDATE schema_version SET version = ?").run(3);
       console.log("Schema v3 migration complete.");
     }
+    if (fromVersion < 4) {
+      console.log("Migrating schema v3 → v4...");
+      this.db.exec("PRAGMA foreign_keys=OFF");
+      this.db.exec(`
+        CREATE TABLE atoms_new (
+          hash TEXT PRIMARY KEY, source TEXT NOT NULL, gzip_size INTEGER NOT NULL,
+          description TEXT NOT NULL, goal TEXT REFERENCES goals(name),
+          status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft', 'published')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO atoms_new SELECT hash, source, gzip_size, description, goal, 'published', created_at FROM atoms;
+        DROP TABLE atoms;
+        ALTER TABLE atoms_new RENAME TO atoms;
+        CREATE TABLE IF NOT EXISTS archive (
+          hash TEXT PRIMARY KEY, source TEXT NOT NULL, gzip_size INTEGER NOT NULL,
+          description TEXT NOT NULL, goal TEXT, status TEXT NOT NULL,
+          created_at TEXT NOT NULL, archived_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      // Recreate FTS triggers
+      this.db.exec(`
+        DROP TRIGGER IF EXISTS atoms_fts_insert;
+        DROP TRIGGER IF EXISTS atoms_fts_delete;
+        CREATE TRIGGER atoms_fts_insert AFTER INSERT ON atoms
+        WHEN NEW.status = 'published'
+        BEGIN
+          INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
+        END;
+        CREATE TRIGGER atoms_fts_delete AFTER DELETE ON atoms BEGIN
+          INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
+        END;
+        CREATE TRIGGER atoms_fts_publish AFTER UPDATE OF status ON atoms
+        WHEN NEW.status = 'published' AND OLD.status = 'draft'
+        BEGIN
+          INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
+        END;
+      `);
+      this.db.exec("PRAGMA foreign_keys=ON");
+      this.db.prepare("UPDATE schema_version SET version = ?").run(4);
+      console.log("Schema v4 migration complete.");
+    }
   }
 
   // --- Hash resolution ---
@@ -282,11 +344,12 @@ export class Db {
     gzipSize: number,
     description: string,
     goal?: string,
+    status: "draft" | "published" = "published",
   ): boolean {
     try {
       this.db.prepare(
-        "INSERT INTO atoms (hash, source, gzip_size, description, goal) VALUES (?, ?, ?, ?, ?)",
-      ).run(hash, source, gzipSize, description, goal ?? null);
+        "INSERT INTO atoms (hash, source, gzip_size, description, goal, status) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(hash, source, gzipSize, description, goal ?? null, status);
       return true;
     } catch {
       // UNIQUE constraint = already exists
@@ -296,13 +359,14 @@ export class Db {
 
   getAtom(hash: string): Atom | null {
     const row = this.db.prepare(
-      "SELECT hash, source, gzip_size, description, goal, created_at FROM atoms WHERE hash = ?",
+      "SELECT hash, source, gzip_size, description, goal, status, created_at FROM atoms WHERE hash = ?",
     ).get<{
       hash: string;
       source: string;
       gzip_size: number;
       description: string;
       goal: string | null;
+      status: string;
       created_at: string;
     }>(hash);
     if (!row) return null;
@@ -312,6 +376,7 @@ export class Db {
       gzipSize: row.gzip_size,
       description: row.description,
       goal: row.goal,
+      status: row.status as "draft" | "published",
       createdAt: row.created_at,
     };
   }
@@ -321,10 +386,14 @@ export class Db {
     goal?: string;
     broken?: boolean;
     prop?: string;
+    status?: "draft" | "published";
   }): Omit<Atom, "source">[] {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
     let join = "";
+    // Default to published only
+    conditions.push("a.status = ?");
+    params.push(opts.status ?? "published");
     if (opts.goal) {
       conditions.push("a.goal = ?");
       params.push(opts.goal);
@@ -342,12 +411,13 @@ export class Db {
     const limit = opts.recent ? `LIMIT ?` : "";
     if (opts.recent) params.push(opts.recent);
     const rows = this.db.prepare(
-      `SELECT a.hash, a.gzip_size, a.description, a.goal, a.created_at FROM atoms a ${join} ${where} ORDER BY a.created_at DESC ${limit}`,
+      `SELECT a.hash, a.gzip_size, a.description, a.goal, a.status, a.created_at FROM atoms a ${join} ${where} ORDER BY a.created_at DESC ${limit}`,
     ).all<{
       hash: string;
       gzip_size: number;
       description: string;
       goal: string | null;
+      status: string;
       created_at: string;
     }>(...params);
     return rows.map((r) => ({
@@ -355,6 +425,7 @@ export class Db {
       gzipSize: r.gzip_size,
       description: r.description,
       goal: r.goal,
+      status: r.status as "draft" | "published",
       createdAt: r.created_at,
     }));
   }
@@ -378,6 +449,93 @@ export class Db {
       "DELETE FROM atoms WHERE hash = ?",
     ).run(hash);
     return changes > 0;
+  }
+
+  getAtomStatus(hash: string): "draft" | "published" | null {
+    const row = this.db.prepare(
+      "SELECT status FROM atoms WHERE hash = ?",
+    ).get<{ status: string }>(hash);
+    return (row?.status as "draft" | "published") ?? null;
+  }
+
+  publishAtom(hash: string, description: string, goal?: string): boolean {
+    const changes = this.db.prepare(
+      "UPDATE atoms SET status = 'published', description = ?, goal = ? WHERE hash = ? AND status = 'draft'",
+    ).run(description, goal ?? null, hash);
+    return changes > 0;
+  }
+
+  listDrafts(): Omit<Atom, "source">[] {
+    const rows = this.db.prepare(
+      "SELECT hash, gzip_size, description, goal, status, created_at FROM atoms WHERE status = 'draft' ORDER BY created_at DESC",
+    ).all<{
+      hash: string;
+      gzip_size: number;
+      description: string;
+      goal: string | null;
+      status: string;
+      created_at: string;
+    }>();
+    return rows.map((r) => ({
+      hash: r.hash,
+      gzipSize: r.gzip_size,
+      description: r.description,
+      goal: r.goal,
+      status: r.status as "draft" | "published",
+      createdAt: r.created_at,
+    }));
+  }
+
+  archiveAtom(hash: string): void {
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare(
+        "INSERT INTO archive (hash, source, gzip_size, description, goal, status, created_at) SELECT hash, source, gzip_size, description, goal, status, created_at FROM atoms WHERE hash = ?",
+      ).run(hash);
+      this.db.prepare("DELETE FROM embeddings WHERE hash = ?").run(hash);
+      this.db.prepare("DELETE FROM properties WHERE hash = ?").run(hash);
+      this.db.prepare(
+        "DELETE FROM relationships WHERE from_hash = ? OR to_hash = ?",
+      ).run(hash, hash);
+      this.db.prepare(
+        "DELETE FROM test_evaluation WHERE test_atom = ? OR target_atom = ?",
+      ).run(hash, hash);
+      this.db.prepare("DELETE FROM atoms WHERE hash = ?").run(hash);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  getArchivedAtom(hash: string): Atom | null {
+    const row = this.db.prepare(
+      "SELECT hash, source, gzip_size, description, goal, status, created_at FROM archive WHERE hash = ?",
+    ).get<{
+      hash: string;
+      source: string;
+      gzip_size: number;
+      description: string;
+      goal: string | null;
+      status: string;
+      created_at: string;
+    }>(hash);
+    if (!row) return null;
+    return {
+      hash: row.hash,
+      source: row.source,
+      gzipSize: row.gzip_size,
+      description: row.description,
+      goal: row.goal,
+      status: row.status as "draft" | "published",
+      createdAt: row.created_at,
+    };
+  }
+
+  listStaleDrafts(olderThan: string): string[] {
+    return this.db.prepare(
+      "SELECT hash FROM atoms WHERE status = 'draft' AND created_at < ?",
+    ).all<{ hash: string }>(olderThan).map((r) => r.hash);
   }
 
   updateDescription(hash: string, description: string): boolean {
@@ -804,7 +962,10 @@ export class Db {
       .map((t) => `"${t.replace(/"/g, '""')}"`)
       .join(" ");
     return this.db.prepare(
-      "SELECT hash, snippet(atoms_fts, 1, '[[', ']]', '...', 40) as snippet FROM atoms_fts WHERE source MATCH ? ORDER BY rank LIMIT ?",
+      `SELECT f.hash, snippet(atoms_fts, 1, '[[', ']]', '...', 40) as snippet
+       FROM atoms_fts f JOIN atoms a ON a.hash = f.hash
+       WHERE f.source MATCH ? AND a.status = 'published'
+       ORDER BY rank LIMIT ?`,
     ).all<{ hash: string; snippet: string }>(safe, limit).map((r) => ({
       hash: r.hash,
       snippet: r.snippet.replace(/\[\[/g, "<mark>").replace(/]]/g, "</mark>"),
@@ -1032,8 +1193,9 @@ export class Db {
     }[];
     activeGoals: { name: string; weight: number }[];
   } {
-    const totalAtoms = this.db.prepare("SELECT count(*) as c FROM atoms")
-      .get<{ c: number }>()!.c;
+    const totalAtoms = this.db.prepare(
+      "SELECT count(*) as c FROM atoms WHERE status = 'published'",
+    ).get<{ c: number }>()!.c;
 
     const defects = this.db.prepare(
       "SELECT count(DISTINCT target_atom) as c FROM test_evaluation WHERE expected_outcome = 'violates_intent'",
@@ -1044,7 +1206,7 @@ export class Db {
     ).get<{ c: number }>()!.c;
 
     const recentAtoms = this.db.prepare(
-      "SELECT count(*) as c FROM atoms WHERE created_at >= ?",
+      "SELECT count(*) as c FROM atoms WHERE status = 'published' AND created_at >= ?",
     ).get<{ c: number }>(since)!.c;
 
     const recentRelationships = this.db.prepare(

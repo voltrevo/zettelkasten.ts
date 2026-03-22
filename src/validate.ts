@@ -120,3 +120,33 @@ export function isTestAtom(source: string): boolean {
   }
   return false;
 }
+
+/** Extract the static name string from a Test class, if present. */
+export function extractTestName(source: string): string | null {
+  const file = ts.createSourceFile(
+    "atom.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  for (const node of file.statements) {
+    if (
+      ts.isClassDeclaration(node) &&
+      node.name?.text === "Test" &&
+      ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export
+    ) {
+      for (const member of node.members) {
+        if (
+          ts.isPropertyDeclaration(member) &&
+          member.name && ts.isIdentifier(member.name) &&
+          member.name.text === "name" &&
+          ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Static &&
+          member.initializer && ts.isStringLiteral(member.initializer)
+        ) {
+          return member.initializer.text;
+        }
+      }
+    }
+  }
+  return null;
+}

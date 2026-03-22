@@ -18,7 +18,7 @@ import {
 import { HnswIndex } from "./hnsw.ts";
 import { minify } from "./minify.ts";
 import { getDefaultPrompt, type PromptName } from "./prompts.ts";
-import { isTestAtom, validateAtom } from "./validate.ts";
+import { extractTestName, isTestAtom, validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
 
@@ -279,7 +279,7 @@ async function route(req: Request): Promise<Response> {
       new Response("Not found", { status: 404 });
   }
 
-  // GET /a/<aa>/<bb>/<rest>.ts — retrieve code by content address
+  // GET /a/<aa>/<bb>/<rest>.ts — retrieve code by content address (published + drafts)
   if (req.method === "GET") {
     const hash = parseHashFromPath(path);
     if (hash) {
@@ -291,29 +291,36 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
-  // POST /a — store atom [dev]
-  if (req.method === "POST" && path === "/a") {
+  // GET /archive/<aa>/<bb>/<rest>.ts — retrieve from archive + atoms [admin]
+  if (req.method === "GET") {
+    const archivePath = path.replace(/^\/archive\//, "/a/");
+    if (archivePath !== path) {
+      const hash = parseHashFromPath(archivePath);
+      if (hash) {
+        const authErr = requireAuth(req, "admin");
+        if (authErr) return authErr;
+        // Try atoms first (published + draft), then archive
+        const source = db.getSource(hash);
+        if (source) {
+          return new Response(source, {
+            headers: { "content-type": "application/typescript" },
+          });
+        }
+        const archived = db.getArchivedAtom(hash);
+        if (archived) {
+          return new Response(archived.source, {
+            headers: { "content-type": "application/typescript" },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      }
+    }
+  }
+
+  // POST /draft — store atom as draft [dev]
+  if (req.method === "POST" && path === "/draft") {
     const authErr = requireAuth(req, "dev");
     if (authErr) return authErr;
-    let description = req.headers.get("x-description");
-    if (
-      description && req.headers.get("x-description-encoding") === "base64utf8"
-    ) {
-      description = new TextDecoder().decode(
-        Uint8Array.from(atob(description), (c) => c.charCodeAt(0)),
-      );
-    }
-    const allowNoDesc = req.headers.get("x-allow-no-description");
-    if (!description && !allowNoDesc) {
-      return new Response(
-        "Missing X-Description header. Use X-Allow-No-Description: true to opt out.",
-        { status: 400 },
-      );
-    }
-    const goal = req.headers.get("x-goal") || undefined;
-    if (goal && !db.goalExists(goal)) {
-      return new Response(`Goal not found: ${goal}`, { status: 400 });
-    }
     const content = await req.text();
     if (!content) {
       return new Response("Empty content", { status: 400 });
@@ -349,126 +356,355 @@ async function route(req: Request): Promise<Response> {
     const hash = contentHash(content);
     const urlPath = hashToUrlPath(hash);
 
-    // Idempotent: already exists
-    if (db.atomExists(hash)) {
-      return new Response(`${urlPath}\n`, {
-        status: 200,
-        headers: { "content-type": "text/plain" },
-      });
+    // Collision: already published
+    const existingStatus = db.getAtomStatus(hash);
+    if (existingStatus === "published") {
+      return new Response(`Already published as ${hash}`, { status: 409 });
     }
-
-    // One of three testing modes is required
-    const requireTests = req.headers.get("x-require-tests");
-    const isTest = req.headers.get("x-is-test") === "true";
-    const noTests = req.headers.get("x-no-tests") === "true";
-
-    if (!requireTests && !isTest && !noTests) {
+    // Collision: already a draft — rerun checks passed above, return hash
+    if (existingStatus === "draft") {
       return new Response(
-        "Testing mode required: X-Require-Tests, X-Is-Test: true, or X-No-Tests: true",
-        { status: 400 },
+        JSON.stringify({ hash, url: urlPath, existing: true }),
+        { status: 200, headers: { "content-type": "application/json" } },
       );
     }
 
-    if (isTest) {
-      // Validate it actually exports a Test class
-      if (!isTestAtom(content)) {
-        return new Response(
-          "X-Is-Test specified but atom does not export a class named Test",
-          { status: 422 },
-        );
-      }
-      // Dep check still applies — imported atoms must be tested
-      const depCheck = checkDepsTested(content);
-      if (depCheck) return depCheck;
-    }
-
-    if (requireTests) {
-      const testHashes = requireTests.split(",").map((s) => s.trim()).filter(
-        Boolean,
-      );
-      for (const th of testHashes) {
-        if (!/^[a-z0-9]{25}$/.test(th)) {
-          return new Response(`Invalid test hash: ${th}`, { status: 400 });
-        }
-        if (!db.atomExists(th)) {
-          return new Response(`Test atom not found: ${th}`, { status: 404 });
-        }
-      }
-
-      // Verify all transitive deps are tested
-      const depCheck = checkDepsTested(content);
-      if (depCheck) return depCheck;
-
-      // Store atom first (test runner imports it from the server)
-      const gz = await gzipSize(minify(content));
-      db.insertAtom(hash, content, gz, description ?? "", goal);
-
-      const fail = await runTests(testHashes, hash);
-      if (fail) {
-        // Roll back on test failure
-        db.deleteAtom(hash);
-        return fail;
-      }
-
-      // Auto-register test relationships + evaluation metadata
-      for (const th of testHashes) {
-        db.insertRelationship(th, "tests", hash);
-        db.upsertTestEvaluation(th, hash, "pass");
-      }
-
-      // Auto-register import relationships
-      for (const dep of extractDependencies(content)) {
-        db.insertRelationship(hash, "imports", dep);
-      }
-
-      db.insertLog({
-        op: "atom.create",
-        subject: hash,
-        detail: JSON.stringify({ gzip_size: gz }),
-      });
-
-      // Generate embedding if description provided
-      if (description) {
-        const vec = await fetchEmbedding(description, embedConfig);
-        if (vec) {
-          db.upsertEmbedding(hash, vec, description);
-          hnswIndex.add(hash, vec);
-        }
-      }
-
-      return new Response(`${urlPath}\n`, {
-        status: 201,
-        headers: { "content-type": "text/plain" },
-      });
-    }
-
-    // --is-test or --no-tests: store without running tests
     const gz = await gzipSize(minify(content));
-    db.insertAtom(hash, content, gz, description ?? "", goal);
+    db.insertAtom(hash, content, gz, "", undefined, "draft");
 
     // Auto-register import relationships
     for (const dep of extractDependencies(content)) {
       db.insertRelationship(hash, "imports", dep);
     }
 
-    db.insertLog({
-      op: "atom.create",
-      subject: hash,
-      detail: JSON.stringify({ gzip_size: gz }),
-    });
+    db.insertLog({ op: "atom.draft", subject: hash });
 
-    // Generate embedding if description provided
-    if (description) {
-      const vec = await fetchEmbedding(description, embedConfig);
-      if (vec) {
-        db.upsertEmbedding(hash, vec, description);
-        hnswIndex.add(hash, vec);
+    return new Response(
+      JSON.stringify({ hash, url: urlPath, existing: false }),
+      { status: 201, headers: { "content-type": "application/json" } },
+    );
+  }
+
+  // POST /add-test — add test atom targeting draft or published atoms [dev]
+  if (req.method === "POST" && path === "/add-test") {
+    const authErr = requireAuth(req, "dev");
+    if (authErr) return authErr;
+    let body: { source?: string; targets?: string[] };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+    if (!body.source || !body.targets?.length) {
+      return new Response("Missing source or targets", { status: 400 });
+    }
+
+    const validationError = await validateAtom(body.source);
+    if (validationError) {
+      return new Response(validationError.message, { status: 422 });
+    }
+
+    if (!isTestAtom(body.source)) {
+      return new Response(
+        "Not a valid test atom: must export a class named Test",
+        { status: 422 },
+      );
+    }
+    const testName = extractTestName(body.source);
+
+    // Lint check
+    try {
+      const lintRes = await fetch(`${checkerUrl}/lint`, {
+        method: "POST",
+        body: body.source,
+      });
+      const lint = await lintRes.json() as {
+        passed: boolean;
+        diagnostics: string;
+      };
+      if (!lint.passed) {
+        return new Response(`Lint errors:\n${lint.diagnostics}`, {
+          status: 422,
+        });
+      }
+    } catch (e) {
+      return new Response(
+        `Lint check failed: checker unreachable (${(e as Error).message})`,
+        { status: 503 },
+      );
+    }
+
+    const hash = contentHash(body.source);
+
+    // Collision checks
+    const existingStatus = db.getAtomStatus(hash);
+    if (existingStatus === "published") {
+      return new Response(`Already published as ${hash}`, { status: 409 });
+    }
+
+    // Resolve targets
+    const resolvedTargets: string[] = [];
+    for (const t of body.targets) {
+      const resolved = resolveHash(t);
+      if (resolved instanceof Response) return resolved;
+      resolvedTargets.push(resolved);
+    }
+
+    // Store test as draft if not already
+    if (!existingStatus) {
+      const gz = await gzipSize(minify(body.source));
+      db.insertAtom(hash, body.source, gz, testName ?? "", undefined, "draft");
+      for (const dep of extractDependencies(body.source)) {
+        db.insertRelationship(hash, "imports", dep);
       }
     }
 
-    return new Response(`${urlPath}\n`, {
-      status: 201,
-      headers: { "content-type": "text/plain" },
+    // Run test against each target
+    const results: { target: string; passed: boolean; error?: string }[] = [];
+    for (const target of resolvedTargets) {
+      const res = await fetch(`${checkerUrl}/check`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ serverUrl, targetHash: target, testHashes: [hash] }),
+      });
+      const result = await res.json() as {
+        passed: boolean;
+        durationMs: number;
+        stdout: string;
+        stderr: string;
+      };
+      db.insertTestRun({
+        testAtom: hash,
+        targetAtom: target,
+        runBy: "checker",
+        result: result.passed ? "pass" : "fail",
+        durationMs: result.durationMs,
+        details: result.passed ? null : result.stdout + result.stderr,
+      });
+      if (!result.passed) {
+        // Roll back: delete test draft if we just created it
+        if (!existingStatus) {
+          db.deleteAtom(hash);
+        }
+        return new Response(
+          JSON.stringify({
+            hash,
+            testName,
+            error: result.stdout + result.stderr,
+            target,
+          }),
+          { status: 422, headers: { "content-type": "application/json" } },
+        );
+      }
+      db.insertRelationship(hash, "tests", target);
+      db.upsertTestEvaluation(hash, target, "pass");
+      results.push({ target, passed: true });
+    }
+
+    db.insertLog({ op: "atom.add-test", subject: hash });
+
+    return new Response(
+      JSON.stringify({ hash, testName, results }),
+      { status: 201, headers: { "content-type": "application/json" } },
+    );
+  }
+
+  // POST /publish/<hash> — promote draft to published [dev]
+  if (req.method === "POST") {
+    const publishMatch = path.match(/^\/publish\/([a-z0-9]+)$/);
+    if (publishMatch) {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
+
+      const resolved = resolveHash(publishMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const hash = resolved;
+
+      const status = db.getAtomStatus(hash);
+      if (!status) return new Response("Not found", { status: 404 });
+      if (status === "published") {
+        return new Response("Already published", { status: 409 });
+      }
+
+      // Parse description from header or body
+      let description = req.headers.get("x-description");
+      if (
+        description &&
+        req.headers.get("x-description-encoding") === "base64utf8"
+      ) {
+        description = new TextDecoder().decode(
+          Uint8Array.from(atob(description), (c) => c.charCodeAt(0)),
+        );
+      }
+      // Also accept JSON body
+      if (!description) {
+        try {
+          const body = await req.json();
+          description = body.description;
+        } catch { /* not JSON, that's fine */ }
+      }
+
+      const atom = db.getAtom(hash);
+      if (!atom) return new Response("Not found", { status: 404 });
+
+      const isTest = isTestAtom(atom.source);
+
+      if (!description && !isTest) {
+        return new Response(
+          "Description required for publishing. Pass X-Description header or JSON body with description field.",
+          { status: 400 },
+        );
+      }
+
+      // Check all imports are published
+      const deps = extractDependencies(atom.source);
+      const unpublished = deps.filter(
+        (d) => db.getAtomStatus(d) !== "published",
+      );
+      if (unpublished.length > 0) {
+        return new Response(
+          `Cannot publish: unpublished dependencies: ${unpublished.join(", ")}. Publish them first.`,
+          { status: 422 },
+        );
+      }
+
+      // Check has tests (unless it IS a test)
+      if (!isTest) {
+        const tests = db.queryRelationships({ to: hash, kind: "tests" });
+        if (tests.length === 0) {
+          return new Response(
+            "Cannot publish: no tests. Use zts add-test first.",
+            { status: 422 },
+          );
+        }
+      }
+
+      // Auto-publish associated test drafts
+      const autoPublished: string[] = [];
+      if (!isTest) {
+        const testRels = db.queryRelationships({ to: hash, kind: "tests" });
+        for (const rel of testRels) {
+          if (db.getAtomStatus(rel.from) === "draft") {
+            const testAtom = db.getAtom(rel.from);
+            const testDesc = testAtom
+              ? (extractTestName(testAtom.source) ?? "test")
+              : "test";
+            db.publishAtom(rel.from, testDesc);
+            autoPublished.push(rel.from);
+          }
+        }
+      }
+
+      // Parse goal
+      const goal = req.headers.get("x-goal") || undefined;
+      if (goal && !db.goalExists(goal)) {
+        return new Response(`Goal not found: ${goal}`, { status: 400 });
+      }
+
+      // Publish
+      db.publishAtom(hash, description ?? (isTest ? (extractTestName(atom.source) ?? "") : ""), goal);
+
+      // Generate embedding
+      const desc = description ?? extractTestName(atom.source) ?? "";
+      if (desc) {
+        const vec = await fetchEmbedding(desc, embedConfig);
+        if (vec) {
+          db.upsertEmbedding(hash, vec, desc);
+          hnswIndex.add(hash, vec);
+        }
+      }
+
+      // Generate embeddings for auto-published tests
+      for (const testHash of autoPublished) {
+        const testAtom = db.getAtom(testHash);
+        const testDesc = testAtom?.description ?? "";
+        if (testDesc) {
+          const vec = await fetchEmbedding(testDesc, embedConfig);
+          if (vec) {
+            db.upsertEmbedding(testHash, vec, testDesc);
+            hnswIndex.add(testHash, vec);
+          }
+        }
+      }
+
+      db.insertLog({ op: "atom.publish", subject: hash });
+
+      return new Response(
+        JSON.stringify({
+          hash,
+          url: hashToUrlPath(hash),
+          autoPublished,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+  }
+
+  // POST /archive/<hash> — archive a draft [dev]
+  if (req.method === "POST") {
+    const archiveMatch = path.match(/^\/archive\/([a-z0-9]+)$/);
+    if (archiveMatch) {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
+
+      const resolved = resolveHash(archiveMatch[1]);
+      if (resolved instanceof Response) return resolved;
+      const hash = resolved;
+
+      const status = db.getAtomStatus(hash);
+      if (!status) return new Response("Not found", { status: 404 });
+      if (status === "published") {
+        return new Response("Cannot archive published atoms. Use delete (admin) instead.", { status: 422 });
+      }
+
+      // Check nothing non-archived imports this draft
+      const importedBy = db.queryRelationships({ to: hash, kind: "imports" });
+      const blockingImporters = importedBy.filter(
+        (r) => db.getAtomStatus(r.from) !== null,
+      );
+      if (blockingImporters.length > 0) {
+        return new Response(
+          `Cannot archive: imported by ${blockingImporters.map((r) => r.from).join(", ")}`,
+          { status: 422 },
+        );
+      }
+
+      // Find orphaned test drafts to cascade
+      const testRels = db.queryRelationships({ to: hash, kind: "tests" });
+      const orphanTests: string[] = [];
+      for (const rel of testRels) {
+        if (db.getAtomStatus(rel.from) !== "draft") continue;
+        // Check if test has other non-archived targets
+        const otherTargets = db.queryRelationships({
+          from: rel.from,
+          kind: "tests",
+        }).filter((r) => r.to !== hash && db.getAtomStatus(r.to) !== null);
+        // Also check if test is imported by any non-archived atom
+        const testImportedBy = db.queryRelationships({
+          to: rel.from,
+          kind: "imports",
+        }).filter((r) => db.getAtomStatus(r.from) !== null);
+        if (otherTargets.length === 0 && testImportedBy.length === 0) {
+          orphanTests.push(rel.from);
+        }
+      }
+
+      db.archiveAtom(hash);
+      for (const t of orphanTests) {
+        db.archiveAtom(t);
+      }
+
+      db.insertLog({ op: "atom.archive", subject: hash });
+
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  // GET /drafts — list current drafts [unauthed]
+  if (req.method === "GET" && path === "/drafts") {
+    const drafts = db.listDrafts();
+    return new Response(JSON.stringify(drafts), {
+      headers: { "content-type": "application/json" },
     });
   }
 
@@ -702,6 +938,7 @@ async function route(req: Request): Promise<Response> {
           description: atom.description,
           gzipSize: atom.gzipSize,
           goal: atom.goal,
+          status: atom.status,
           createdAt: atom.createdAt,
           imports: imports.map((r) => r.to),
           importedBy: importedBy.map((r) => r.from),
@@ -1032,6 +1269,20 @@ async function route(req: Request): Promise<Response> {
       return new Response(`Atom not found: ${to}`, { status: 404 });
     }
 
+    // Supersedes requires both atoms to be published
+    if (kind === "supersedes") {
+      if (db.getAtomStatus(from) !== "published") {
+        return new Response(`Cannot relate: ${from} is a draft`, {
+          status: 422,
+        });
+      }
+      if (db.getAtomStatus(to) !== "published") {
+        return new Response(`Cannot relate: ${to} is a draft`, {
+          status: 422,
+        });
+      }
+    }
+
     if (kind === "tests") {
       const fail = await runTests([from], to);
       if (fail) return fail;
@@ -1082,11 +1333,11 @@ async function route(req: Request): Promise<Response> {
     return new Response("ok\n", { headers: { "content-type": "text/plain" } });
   }
 
-  // DELETE /a/<hash> — delete an orphan atom [dev]
+  // DELETE /a/<hash> — delete an orphan atom [admin]
   if (req.method === "DELETE") {
     const delMatch = path.match(/^\/a\/([a-z0-9]+)$/);
     if (delMatch) {
-      const authErr = requireAuth(req, "dev");
+      const authErr = requireAuth(req, "admin");
       if (authErr) return authErr;
       const resolved = resolveHash(delMatch[1]);
       if (resolved instanceof Response) return resolved;
@@ -1148,7 +1399,7 @@ async function route(req: Request): Promise<Response> {
   // GET /prompts/<name>?default=1 — get compiled default
   if (req.method === "GET") {
     const promptMatch = path.match(
-      /^\/prompts\/(context|iteration|retrospective)$/,
+      /^\/prompts\/(prompt|retrospective)$/,
     );
     if (promptMatch) {
       const name = promptMatch[1] as PromptName;
@@ -1172,7 +1423,7 @@ async function route(req: Request): Promise<Response> {
   // PUT /prompts/<name> — set prompt override [admin]
   if (req.method === "PUT") {
     const promptMatch = path.match(
-      /^\/prompts\/(context|iteration|retrospective)$/,
+      /^\/prompts\/(prompt|retrospective)$/,
     );
     if (promptMatch) {
       const authErr = requireAuth(req, "admin");
@@ -1193,7 +1444,7 @@ async function route(req: Request): Promise<Response> {
   // DELETE /prompts/<name> — reset prompt to default [admin]
   if (req.method === "DELETE") {
     const promptMatch = path.match(
-      /^\/prompts\/(context|iteration|retrospective)$/,
+      /^\/prompts\/(prompt|retrospective)$/,
     );
     if (promptMatch) {
       const authErr = requireAuth(req, "admin");
@@ -1470,9 +1721,59 @@ export function startServer(config: ServerConfig): ServerHandle {
     serverUrl = serverUrl.replace(/:0(\/|$)/, `:${actualPort}$1`);
   }
 
+  // Daily cleanup: archive stale drafts every hour (checks for >1 day old)
+  const cleanupInterval = setInterval(() => {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      .slice(0, 19).replace("T", " ");
+    const stale = db.listStaleDrafts(cutoff);
+    for (const hash of stale) {
+      try {
+        // Check no non-archived atoms import this draft
+        const importedBy = db.queryRelationships({
+          to: hash,
+          kind: "imports",
+        });
+        const blocking = importedBy.filter(
+          (r) => db.getAtomStatus(r.from) !== null,
+        );
+        if (blocking.length > 0) continue;
+
+        // Find orphaned test drafts
+        const testRels = db.queryRelationships({ to: hash, kind: "tests" });
+        const orphanTests: string[] = [];
+        for (const rel of testRels) {
+          if (db.getAtomStatus(rel.from) !== "draft") continue;
+          const otherTargets = db.queryRelationships({
+            from: rel.from,
+            kind: "tests",
+          }).filter((r) => r.to !== hash && db.getAtomStatus(r.to) !== null);
+          const testImportedBy = db.queryRelationships({
+            to: rel.from,
+            kind: "imports",
+          }).filter((r) => db.getAtomStatus(r.from) !== null);
+          if (otherTargets.length === 0 && testImportedBy.length === 0) {
+            orphanTests.push(rel.from);
+          }
+        }
+
+        db.archiveAtom(hash);
+        for (const t of orphanTests) {
+          db.archiveAtom(t);
+        }
+        db.insertLog({ op: "atom.cleanup", subject: hash });
+      } catch (e) {
+        console.error(`Cleanup error for ${hash}: ${(e as Error).message}`);
+      }
+    }
+    if (stale.length > 0) {
+      console.log(`[cleanup] archived ${stale.length} stale draft(s)`);
+    }
+  }, 60 * 60 * 1000);
+
   return {
     port: actualPort,
     async shutdown() {
+      clearInterval(cleanupInterval);
       await server.shutdown();
       db.close();
     },
