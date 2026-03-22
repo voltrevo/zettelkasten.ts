@@ -6,7 +6,7 @@ import { serve } from "./src/server.ts";
 import { serveChecker } from "./src/checker.ts";
 import {
   configPath,
-  DEFAULT_CHECKER_PORT,
+  type ConfigRole,
   DEFAULT_DATA_DIR,
   initConfig,
   loadConfig,
@@ -93,11 +93,15 @@ let cfg!: ZtsConfig;
 let client!: ReturnType<typeof createBearerClient>;
 
 if (needsConfig) {
-  cfg = await loadConfig(cfgPath, dataDir);
-  const baseUrl = `http://localhost:${cfg.serverPort}`;
-  client = createBearerClient(baseUrl, {
-    dev: cfg.devToken,
-    admin: cfg.adminToken,
+  const role: ConfigRole = command === "server"
+    ? "server"
+    : command === "checker"
+    ? "checker"
+    : "client";
+  cfg = await loadConfig(cfgPath, dataDir, role);
+  client = createBearerClient(cfg.serverUrl, {
+    dev: cfg.devToken || undefined,
+    admin: cfg.adminToken || undefined,
   }, Deno);
 }
 
@@ -1473,7 +1477,7 @@ function workerConfig(): WorkerConfig {
     once: args.once ?? false,
     dangerouslySkipPermissions: args["dangerously-skip-permissions"] ?? false,
     model: args.model,
-    serverUrl: `http://localhost:${cfg.serverPort}`,
+    serverUrl: cfg.serverUrl,
     devToken: cfg.devToken,
     contextPromptFile: args["context-prompt"],
     iterationPromptFile: args["iteration-prompt"],
