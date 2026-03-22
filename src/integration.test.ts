@@ -1,11 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { checkEmbeddingService, defaultEmbedConfig } from "./embed.ts";
-import { startServer, type ServerHandle } from "./server.ts";
-import {
-  ApiError,
-  createBearerClient,
-  type ZtsClient,
-} from "./api-client.ts";
+import { type ServerHandle, startServer } from "./server.ts";
+import { ApiError, createBearerClient } from "./api-client.ts";
 
 const DEV_TOKEN = "test-dev";
 const ADMIN_TOKEN = "test-admin";
@@ -83,14 +79,14 @@ Deno.test("integration: full workflow", async (t) => {
   }
 
   try {
-    await timed(t,"empty corpus status", async () => {
+    await timed(t, "empty corpus status", async () => {
       const s = await client.getStatus();
       log("status:", JSON.stringify(s));
       assertEquals(s.totalAtoms, 0);
       assertEquals(s.defects, 0);
     });
 
-    await timed(t,"create goal", async () => {
+    await timed(t, "create goal", async () => {
       const g = await client.createGoal("test-goal", {
         weight: 2,
         body: "Integration test goal",
@@ -99,13 +95,13 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(g.weight, 2);
     });
 
-    await timed(t,"list goals", async () => {
+    await timed(t, "list goals", async () => {
       const goals = await client.listGoals();
       assertEquals(goals.length, 1);
       assertEquals(goals[0].name, "test-goal");
     });
 
-    await timed(t,"post atom", async () => {
+    await timed(t, "post atom", async () => {
       const source =
         `// Adds two numbers and returns the sum\nexport function add(a: number, b: number): number { return a + b; }\n`;
       atomHash = await client.postAtom(source, {
@@ -117,69 +113,94 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(/^[a-z0-9]+$/.test(atomHash), true);
     }, EMBED);
 
-    await timed(t,"get atom source", async () => {
+    await timed(t, "get atom source", async () => {
       const src = await client.getAtom(atomHash);
       assertEquals(src.includes("export function add"), true);
     });
 
-    await timed(t,"atom info", async () => {
+    await timed(t, "atom info", async () => {
       const info = await client.info(atomHash);
-      log("info:", { hash: info.hash, desc: info.description, goal: info.goal, imports: info.imports, importedBy: info.importedBy, tests: info.tests });
+      log("info:", {
+        hash: info.hash,
+        desc: info.description,
+        goal: info.goal,
+        imports: info.imports,
+        importedBy: info.importedBy,
+        tests: info.tests,
+      });
       assertEquals(info.hash, atomHash);
       assertEquals(info.description, "Adds two numbers and returns the sum");
       assertEquals(info.goal, "test-goal");
       assertEquals(info.imports.length, 0);
     });
 
-    await timed(t,"recent atoms", async () => {
+    await timed(t, "recent atoms", async () => {
       const atoms = await client.recent();
-      log("recent:", atoms.map((a) => `${a.hash.slice(0, 8)}… ${a.description.slice(0, 40)}`));
+      log(
+        "recent:",
+        atoms.map((a) =>
+          `${a.hash.slice(0, 8)}… ${a.description.slice(0, 40)}`
+        ),
+      );
       assertEquals(atoms.length, 1);
       assertEquals(atoms[0].hash, atomHash);
     });
 
-    await timed(t,"recent filtered by goal", async () => {
+    await timed(t, "recent filtered by goal", async () => {
       const match = await client.recent({ goal: "test-goal" });
       assertEquals(match.length, 1);
       const noMatch = await client.recent({ goal: "other" });
       assertEquals(noMatch.length, 0);
     });
 
-    await timed(t,"read description", async () => {
+    await timed(t, "read description", async () => {
       const desc = await client.describeRead(atomHash);
       assertEquals(desc, "Adds two numbers and returns the sum");
     });
 
     if (embedAvailable) {
-      await timed(t,"update description (embed)", async () => {
-        await client.describeUpdate(atomHash, "Adds two integers and returns their sum");
+      await timed(t, "update description (embed)", async () => {
+        await client.describeUpdate(
+          atomHash,
+          "Adds two integers and returns their sum",
+        );
         const desc = await client.describeRead(atomHash);
         log("updated description:", desc);
         assertEquals(desc, "Adds two integers and returns their sum");
       }, EMBED);
 
-      await timed(t,"semantic search (embed)", async () => {
+      await timed(t, "semantic search (embed)", async () => {
         const results = await client.search("add numbers together", 5);
-        log("semantic search results:", results.map((r) => `${r.hash.slice(0, 8)}… score=${r.score.toFixed(3)}`));
+        log(
+          "semantic search results:",
+          results.map((r) =>
+            `${r.hash.slice(0, 8)}… score=${r.score.toFixed(3)}`
+          ),
+        );
         assertEquals(results.length >= 1, true);
         assertEquals(results[0].hash, atomHash);
       }, EMBED);
 
-      await timed(t,"similar atoms (embed)", async () => {
+      await timed(t, "similar atoms (embed)", async () => {
         const results = await client.similar(atomHash, 5);
         log("similar results:", results.length);
         assertEquals(Array.isArray(results), true);
       });
     }
 
-    await timed(t,"code search", async () => {
+    await timed(t, "code search", async () => {
       const results = await client.searchCode("function add");
-      log("code search results:", results.map((r) => `${r.hash.slice(0, 8)}… snippet=${r.snippet?.slice(0, 50)}`));
+      log(
+        "code search results:",
+        results.map((r) =>
+          `${r.hash.slice(0, 8)}… snippet=${r.snippet?.slice(0, 50)}`
+        ),
+      );
       assertEquals(results.length >= 1, true);
       assertEquals(results[0].hash, atomHash);
     });
 
-    await timed(t,"post second atom", async () => {
+    await timed(t, "post second atom", async () => {
       const source =
         `// The mathematical constant pi\nexport const PI = 3.14159;\n`;
       atom2Hash = await client.postAtom(source, {
@@ -190,7 +211,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(atoms.length, 2);
     }, EMBED);
 
-    await timed(t,"properties: set, list, unset", async () => {
+    await timed(t, "properties: set, list, unset", async () => {
       await client.setProperty(atomHash, "starred");
       const props = await client.listProperties(atomHash);
       log("properties after set:", props);
@@ -203,10 +224,15 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(empty.length, 0);
     });
 
-    await timed(t,"relationships: add, query, remove", async () => {
+    await timed(t, "relationships: add, query, remove", async () => {
       await client.addRelationship(atom2Hash, "supersedes", atomHash);
       const rels = await client.queryRelationships({ from: atom2Hash });
-      log("relationships:", rels.map((r) => `${r.from.slice(0, 8)}… --${r.kind}--> ${r.to.slice(0, 8)}…`));
+      log(
+        "relationships:",
+        rels.map((r) =>
+          `${r.from.slice(0, 8)}… --${r.kind}--> ${r.to.slice(0, 8)}…`
+        ),
+      );
       assertEquals(rels.length, 1);
       assertEquals(rels[0].kind, "supersedes");
       assertEquals(rels[0].to, atomHash);
@@ -216,7 +242,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(empty.length, 0);
     });
 
-    await timed(t,"dependents", async () => {
+    await timed(t, "dependents", async () => {
       await client.addRelationship(atom2Hash, "imports", atomHash);
       const deps = await client.dependents(atomHash);
       assertEquals(deps.length, 1);
@@ -224,14 +250,14 @@ Deno.test("integration: full workflow", async (t) => {
       await client.removeRelationship(atom2Hash, "imports", atomHash);
     });
 
-    await timed(t,"tops", async () => {
+    await timed(t, "tops", async () => {
       const tops = await client.tops(atomHash);
       assertEquals(tops.length, 1);
       assertEquals(tops[0].hash, atomHash);
       assertEquals(tops[0].depth, 0);
     });
 
-    await timed(t,"test evaluation CRUD", async () => {
+    await timed(t, "test evaluation CRUD", async () => {
       await client.setTestEvaluation({
         test: atom2Hash,
         target: atomHash,
@@ -251,7 +277,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(updated?.commentary, "works great");
     });
 
-    await timed(t,"goal comments", async () => {
+    await timed(t, "goal comments", async () => {
       await client.addGoalComment("test-goal", "first observation");
       const comments = await client.getGoalComments("test-goal");
       assertEquals(comments.length, 1);
@@ -262,7 +288,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(empty.length, 0);
     });
 
-    await timed(t,"mark goal done requires DONE: comment", async () => {
+    await timed(t, "mark goal done requires DONE: comment", async () => {
       log("attempting markGoalDone without DONE: comment...");
       await assertRejects(
         () => client.markGoalDone("test-goal"),
@@ -281,7 +307,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(undone.done, false);
     });
 
-    await timed(t,"prompts: get, set, reset", async () => {
+    await timed(t, "prompts: get, set, reset", async () => {
       const def = await client.getPrompt("context");
       log("default prompt source:", def.source, "length:", def.text.length);
       assertEquals(def.source, "default");
@@ -299,15 +325,20 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(reset.source, "default");
     });
 
-    await timed(t,"log entries", async () => {
+    await timed(t, "log entries", async () => {
       const logs = await client.getLog({ recent: 50 });
-      log("log entries:", logs.length, "ops:", [...new Set(logs.map((l) => l.op))].join(", "));
+      log(
+        "log entries:",
+        logs.length,
+        "ops:",
+        [...new Set(logs.map((l) => l.op))].join(", "),
+      );
       assertEquals(logs.length > 0, true);
       const createLogs = logs.filter((l) => l.op === "atom.create");
       assertEquals(createLogs.length, 2);
     });
 
-    await timed(t,"delete atom", async () => {
+    await timed(t, "delete atom", async () => {
       await client.deleteAtom(atom2Hash);
       await assertRejects(
         () => client.getAtom(atom2Hash),
@@ -315,24 +346,24 @@ Deno.test("integration: full workflow", async (t) => {
       );
     });
 
-    await timed(t,"status reflects changes", async () => {
+    await timed(t, "status reflects changes", async () => {
       const s = await client.getStatus();
       assertEquals(s.totalAtoms, 1);
     });
 
-    await timed(t,"hash prefix resolution", async () => {
+    await timed(t, "hash prefix resolution", async () => {
       const info = await client.info(atomHash.slice(0, 6));
       assertEquals(info.hash, atomHash);
     });
 
     // ---- Auth tier enforcement ----
 
-    await timed(t,"unauthed reads work", async () => {
+    await timed(t, "unauthed reads work", async () => {
       const src = await unauthClient.getAtom(atomHash);
       assertEquals(src.includes("export function add"), true);
     });
 
-    await timed(t,"unauthed writes rejected", async () => {
+    await timed(t, "unauthed writes rejected", async () => {
       await assertRejects(
         () =>
           unauthClient.postAtom("export const x = 1;\n", {
@@ -342,21 +373,21 @@ Deno.test("integration: full workflow", async (t) => {
       );
     });
 
-    await timed(t,"dev token cannot create goals", async () => {
+    await timed(t, "dev token cannot create goals", async () => {
       await assertRejects(
         () => devOnlyClient.createGoal("dev-goal"),
         ApiError,
       );
     });
 
-    await timed(t,"dev token cannot set admin-only property", async () => {
+    await timed(t, "dev token cannot set admin-only property", async () => {
       await assertRejects(
         () => devOnlyClient.setProperty(atomHash, "starred"),
         ApiError,
       );
     });
 
-    await timed(t,"dev token can set non-admin property", async () => {
+    await timed(t, "dev token can set non-admin property", async () => {
       await devOnlyClient.setProperty(atomHash, "category", "math");
       const props = await client.listProperties(atomHash);
       log("dev-set property:", props);
@@ -365,7 +396,7 @@ Deno.test("integration: full workflow", async (t) => {
       await client.unsetProperty(atomHash, "category");
     });
 
-    await timed(t,"dev token cannot set prompt override", async () => {
+    await timed(t, "dev token cannot set prompt override", async () => {
       await assertRejects(
         () => devOnlyClient.setPrompt("context", "hacked"),
         ApiError,
@@ -374,7 +405,7 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Idempotent post ----
 
-    await timed(t,"idempotent post returns same hash", async () => {
+    await timed(t, "idempotent post returns same hash", async () => {
       const source =
         `// Adds two numbers and returns the sum\nexport function add(a: number, b: number): number { return a + b; }\n`;
       const hash2 = await client.postAtom(source, {
@@ -387,9 +418,10 @@ Deno.test("integration: full workflow", async (t) => {
 
     let depAtomHash = "";
 
-    await timed(t,"post atom that imports another", async () => {
-      const source =
-        `// Doubles using add\nimport { add } from "${importPath(atomHash)}";\nexport function double(n: number): number { return add(n, n); }\n`;
+    await timed(t, "post atom that imports another", async () => {
+      const source = `// Doubles using add\nimport { add } from "${
+        importPath(atomHash)
+      }";\nexport function double(n: number): number { return add(n, n); }\n`;
       depAtomHash = await client.postAtom(source, {
         description: "Doubles a number using add",
       });
@@ -397,9 +429,14 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(depAtomHash.length, 25);
     }, EMBED);
 
-    await timed(t,"info shows imports and importedBy", async () => {
+    await timed(t, "info shows imports and importedBy", async () => {
       const depInfo = await client.info(depAtomHash);
-      log("dep info imports:", depInfo.imports, "importedBy:", depInfo.importedBy);
+      log(
+        "dep info imports:",
+        depInfo.imports,
+        "importedBy:",
+        depInfo.importedBy,
+      );
       assertEquals(depInfo.imports.includes(atomHash), true);
 
       const baseInfo = await client.info(atomHash);
@@ -407,7 +444,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(baseInfo.importedBy.includes(depAtomHash), true);
     });
 
-    await timed(t,"delete atom with relationships rejected", async () => {
+    await timed(t, "delete atom with relationships rejected", async () => {
       log("attempting delete of atom with incoming import...");
       await assertRejects(() => client.deleteAtom(atomHash), ApiError);
       log("correctly rejected (incoming)");
@@ -416,15 +453,20 @@ Deno.test("integration: full workflow", async (t) => {
       log("correctly rejected (outgoing)");
     });
 
-    await timed(t,"bundle with dependencies", async () => {
+    await timed(t, "bundle with dependencies", async () => {
       const bundle = await client.getBundle(depAtomHash);
-      log("bundle size:", bundle.length, "bytes, magic:", `0x${bundle[0].toString(16)}${bundle[1].toString(16)}`);
+      log(
+        "bundle size:",
+        bundle.length,
+        "bytes, magic:",
+        `0x${bundle[0].toString(16)}${bundle[1].toString(16)}`,
+      );
       assertEquals(bundle.length > 0, true);
       assertEquals(bundle[0], 0x50);
       assertEquals(bundle[1], 0x4b);
     });
 
-    await timed(t,"delete succeeds after removing relationship", async () => {
+    await timed(t, "delete succeeds after removing relationship", async () => {
       await client.removeRelationship(depAtomHash, "imports", atomHash);
       await client.deleteAtom(depAtomHash);
       await assertRejects(() => client.getAtom(depAtomHash), ApiError);
@@ -436,7 +478,7 @@ Deno.test("integration: full workflow", async (t) => {
     let chainB = "";
     let chainC = "";
 
-    await timed(t,"supersedes chain: A <- B <- C", async () => {
+    await timed(t, "supersedes chain: A <- B <- C", async () => {
       chainA = await client.postAtom(
         `// Chain A\nexport const A = 1;\n`,
         { allowNoDescription: true },
@@ -449,25 +491,32 @@ Deno.test("integration: full workflow", async (t) => {
         `// Chain C\nexport const C = 3;\n`,
         { allowNoDescription: true },
       );
-      log(`chain: ${chainA.slice(0, 8)}… <- ${chainB.slice(0, 8)}… <- ${chainC.slice(0, 8)}…`);
+      log(
+        `chain: ${chainA.slice(0, 8)}… <- ${chainB.slice(0, 8)}… <- ${
+          chainC.slice(0, 8)
+        }…`,
+      );
       await client.addRelationship(chainB, "supersedes", chainA);
       await client.addRelationship(chainC, "supersedes", chainB);
     });
 
-    await timed(t,"tops traverses supersedes chain", async () => {
+    await timed(t, "tops traverses supersedes chain", async () => {
       const tops = await client.tops(chainA);
-      log("tops from A:", tops.map((t) => `${t.hash.slice(0, 8)}… depth=${t.depth}`));
+      log(
+        "tops from A:",
+        tops.map((t) => `${t.hash.slice(0, 8)}… depth=${t.depth}`),
+      );
       assertEquals(tops.length >= 1, true);
       const topHashes = tops.map((t) => t.hash);
       assertEquals(topHashes.includes(chainC), true);
     });
 
-    await timed(t,"tops with limit", async () => {
+    await timed(t, "tops with limit", async () => {
       const tops = await client.tops(chainA, { limit: 1 });
       assertEquals(tops.length, 1);
     });
 
-    await timed(t,"status shows superseded count", async () => {
+    await timed(t, "status shows superseded count", async () => {
       const s = await client.getStatus();
       log("status superseded:", s.superseded, "total:", s.totalAtoms);
       assertEquals(s.superseded >= 2, true);
@@ -475,7 +524,7 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Relationship validation ----
 
-    await timed(t,"duplicate relationship is idempotent", async () => {
+    await timed(t, "duplicate relationship is idempotent", async () => {
       // Already added chainB supersedes chainA — add again
       await client.addRelationship(chainB, "supersedes", chainA);
       const rels = await client.queryRelationships({
@@ -485,7 +534,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(rels.length, 1);
     });
 
-    await timed(t,"query relationships requires filter", async () => {
+    await timed(t, "query relationships requires filter", async () => {
       await assertRejects(
         () => client.queryRelationships({}),
         ApiError,
@@ -494,21 +543,21 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Goal edge cases ----
 
-    await timed(t,"duplicate goal rejected", async () => {
+    await timed(t, "duplicate goal rejected", async () => {
       await assertRejects(
         () => client.createGoal("test-goal"),
         ApiError,
       );
     });
 
-    await timed(t,"get nonexistent goal returns 404", async () => {
+    await timed(t, "get nonexistent goal returns 404", async () => {
       await assertRejects(
         () => client.getGoal("nonexistent"),
         ApiError,
       );
     });
 
-    await timed(t,"update goal weight and body", async () => {
+    await timed(t, "update goal weight and body", async () => {
       await client.updateGoal("test-goal", {
         weight: 5,
         body: "updated body",
@@ -518,7 +567,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(g.body, "updated body");
     });
 
-    await timed(t,"list goals with done filter", async () => {
+    await timed(t, "list goals with done filter", async () => {
       await client.createGoal("done-goal", { weight: 1 });
       await client.addGoalComment("done-goal", "DONE: finished");
       await client.markGoalDone("done-goal");
@@ -538,7 +587,7 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(activeNames.includes("done-goal"), false);
     });
 
-    await timed(t,"goal comments with recent limit", async () => {
+    await timed(t, "goal comments with recent limit", async () => {
       await client.addGoalComment("test-goal", "comment 1");
       await client.addGoalComment("test-goal", "comment 2");
       await client.addGoalComment("test-goal", "comment 3");
@@ -549,12 +598,12 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Recent filtering ----
 
-    await timed(t,"recent with n limit", async () => {
+    await timed(t, "recent with n limit", async () => {
       const limited = await client.recent({ n: 2 });
       assertEquals(limited.length, 2);
     });
 
-    await timed(t,"recent with prop filter", async () => {
+    await timed(t, "recent with prop filter", async () => {
       await client.setProperty(atomHash, "starred");
       const starred = await client.recent({ prop: "starred" });
       log("starred atoms:", starred.map((a) => a.hash.slice(0, 8) + "…"));
@@ -565,28 +614,31 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Log filtering ----
 
-    await timed(t,"log filtered by subject", async () => {
+    await timed(t, "log filtered by subject", async () => {
       const logs = await client.getLog({ subject: atomHash });
-      log("logs for atom:", logs.map((l) => `${l.op} ${l.subject?.slice(0, 8)}…`));
+      log(
+        "logs for atom:",
+        logs.map((l) => `${l.op} ${l.subject?.slice(0, 8)}…`),
+      );
       assertEquals(logs.length >= 1, true);
       for (const l of logs) {
         assertEquals(l.subject, atomHash);
       }
     });
 
-    await timed(t,"log with recent limit", async () => {
+    await timed(t, "log with recent limit", async () => {
       const logs = await client.getLog({ recent: 1 });
       assertEquals(logs.length, 1);
     });
 
     // ---- Status details ----
 
-    await timed(t,"status with future since shows zero recent", async () => {
+    await timed(t, "status with future since shows zero recent", async () => {
       const s = await client.getStatus("2099-01-01");
       assertEquals(s.recentAtoms, 0);
     });
 
-    await timed(t,"status goalStats", async () => {
+    await timed(t, "status goalStats", async () => {
       const s = await client.getStatus();
       log("goalStats:", s.goalStats);
       const goalStat = s.goalStats.find((g) => g.name === "test-goal");
@@ -596,7 +648,7 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Prompt edge cases ----
 
-    await timed(t,"get all three default prompts", async () => {
+    await timed(t, "get all three default prompts", async () => {
       for (const name of ["context", "iteration", "retrospective"]) {
         const p = await client.getPrompt(name);
         assertEquals(p.source, "default");
@@ -604,15 +656,25 @@ Deno.test("integration: full workflow", async (t) => {
       }
     });
 
-    await timed(t,"get default-only ignores override", async () => {
+    await timed(t, "get default-only ignores override", async () => {
       await client.setPrompt("iteration", "override text");
       const def = await client.getPrompt("iteration", true);
-      log("default-only source:", def.source, "contains override?", def.text.includes("override text"));
+      log(
+        "default-only source:",
+        def.source,
+        "contains override?",
+        def.text.includes("override text"),
+      );
       assertEquals(def.source, "default");
       assertEquals(def.text.includes("override text"), false);
 
       const over = await client.getPrompt("iteration");
-      log("active prompt source:", over.source, "text:", over.text.slice(0, 30));
+      log(
+        "active prompt source:",
+        over.source,
+        "text:",
+        over.text.slice(0, 30),
+      );
       assertEquals(over.source, "override");
       assertEquals(over.text, "override text");
 
@@ -621,7 +683,7 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Delete nonexistent atom ----
 
-    await timed(t,"delete nonexistent atom returns 404", async () => {
+    await timed(t, "delete nonexistent atom returns 404", async () => {
       await assertRejects(
         () => client.deleteAtom("zzzzzzzzzzzzzzzzzzzzzzzzz"),
         ApiError,
@@ -630,14 +692,14 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Hash prefix edge cases ----
 
-    await timed(t,"nonexistent prefix returns 404", async () => {
+    await timed(t, "nonexistent prefix returns 404", async () => {
       await assertRejects(
         () => client.info("zzzzz"),
         ApiError,
       );
     });
 
-    await timed(t,"single-char prefix is ambiguous", async () => {
+    await timed(t, "single-char prefix is ambiguous", async () => {
       // With multiple atoms, a 1-char prefix should match multiple
       try {
         await client.info(atomHash.slice(0, 1));
@@ -655,7 +717,7 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Test evaluation edge cases ----
 
-    await timed(t,"get nonexistent test evaluation returns null", async () => {
+    await timed(t, "get nonexistent test evaluation returns null", async () => {
       const ev = await client.getTestEvaluation(
         "aaaaaaaaaaaaaaaaaaaaaaaaa",
         "bbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -665,26 +727,29 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Cleanup chain atoms ----
 
-    await timed(t,"cleanup: remove chain relationships and atoms", async () => {
-      await client.removeRelationship(chainC, "supersedes", chainB);
-      await client.removeRelationship(chainB, "supersedes", chainA);
-      await client.deleteAtom(chainC);
-      await client.deleteAtom(chainB);
-      await client.deleteAtom(chainA);
-    });
+    await timed(
+      t,
+      "cleanup: remove chain relationships and atoms",
+      async () => {
+        await client.removeRelationship(chainC, "supersedes", chainB);
+        await client.removeRelationship(chainB, "supersedes", chainA);
+        await client.deleteAtom(chainC);
+        await client.deleteAtom(chainB);
+        await client.deleteAtom(chainA);
+      },
+    );
 
     // ---- Scripting (last — slow due to subprocess) ----
 
-    await timed(t,"script: inline type-checks and runs", async () => {
-      const code =
-        `const atoms = await zts.recent({ n: 1 });\n` +
+    await timed(t, "script: inline type-checks and runs", async () => {
+      const code = `const atoms = await zts.recent({ n: 1 });\n` +
         `if (atoms.length !== 1) throw new Error("expected 1 atom, got " + atoms.length);\n` +
         `if (!atoms[0].hash) throw new Error("missing hash");\n`;
       const result = await client.script(code);
       assertEquals(result.code, 0);
     }, SUBPROCESS);
 
-    await timed(t,"script: file mode", async () => {
+    await timed(t, "script: file mode", async () => {
       const scriptPath = `${TMP_DIR}/file-script.ts`;
       await Deno.writeTextFile(
         scriptPath,
@@ -694,15 +759,17 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(result.code, 0);
     }, SUBPROCESS);
 
-    await timed(t,"script: inline type error fails check", async () => {
+    await timed(t, "script: inline type error fails check", async () => {
       const result = await client.script(
         `const x: number = await zts.recent();\n`,
       );
-      console.log("  (type checking error above is expected — testing that bad scripts are rejected)");
+      console.log(
+        "  (type checking error above is expected — testing that bad scripts are rejected)",
+      );
       assertEquals(result.code !== 0, true);
     }, SUBPROCESS);
 
-    await timed(t,"scriptTypes returns type definitions", async () => {
+    await timed(t, "scriptTypes returns type definitions", async () => {
       const types = await client.scriptTypes();
       assertEquals(types.includes("interface ZtsClient"), true);
       assertEquals(types.includes("interface AtomSummary"), true);

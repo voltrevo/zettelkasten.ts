@@ -1,12 +1,12 @@
 import { defineConfig } from "vite";
-import { resolve } from "path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: ".",
   base: "/ui/",
-  optimizeDeps: {
-    include: [],
-  },
   resolve: {
     alias: {
       "@zts/api-client": resolve(__dirname, "src/api-client.ts"),

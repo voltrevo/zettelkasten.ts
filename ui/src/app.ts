@@ -10,7 +10,10 @@ export const client: ZtsClient = createCookieClient();
 
 // ---- Raw fetch for non-client operations (login/logout) ----
 
-export async function api(path: string, opts: RequestInit = {}): Promise<Response> {
+export async function api(
+  path: string,
+  opts: RequestInit = {},
+): Promise<Response> {
   const res = await fetch(path, {
     credentials: "same-origin",
     ...opts,
@@ -43,9 +46,9 @@ export function h(
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k === "class") el.className = v as string;
-    else if (k.startsWith("on"))
+    else if (k.startsWith("on")) {
       el.addEventListener(k.slice(2), v as EventListener);
-    else el.setAttribute(k, v as string);
+    } else el.setAttribute(k, v as string);
   }
   for (const c of children) {
     if (typeof c === "string") el.append(c);
@@ -120,7 +123,9 @@ export async function navigate(hash: string): Promise<void> {
     content.replaceChildren(el);
   } catch (e) {
     if ((e as Error).message === "auth") return;
-    content.innerHTML = `<div class="empty">Error: ${(e as Error).message}</div>`;
+    content.innerHTML = `<div class="empty">Error: ${
+      (e as Error).message
+    }</div>`;
   }
 }
 

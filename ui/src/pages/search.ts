@@ -1,5 +1,9 @@
 import { client, h, registerPage, relTime, shortHash } from "../app";
-import type { AtomSummary, CodeSearchResult, SearchResult } from "@zts/api-client";
+import type {
+  AtomSummary,
+  CodeSearchResult,
+  SearchResult,
+} from "@zts/api-client";
 
 let cached: HTMLElement | null = null;
 
@@ -32,7 +36,9 @@ registerPage("search", async () => {
     style: "flex:1",
   }) as HTMLInputElement;
   const searchBtn = h("button", { class: "btn btn-sm" }, "Search");
-  const goalSelect = h("select", { style: "font-size:0.85rem" }) as HTMLSelectElement;
+  const goalSelect = h("select", {
+    style: "font-size:0.85rem",
+  }) as HTMLSelectElement;
   goalSelect.append(h("option", { value: "" }, "All goals"));
   const brokenToggle = h(
     "label",
@@ -71,12 +77,16 @@ registerPage("search", async () => {
     if ((e as KeyboardEvent).key === "Enter") doSearch();
   });
   goalSelect.addEventListener("change", doSearch);
-  (row.querySelector(".broken-check") as HTMLInputElement).addEventListener("change", doSearch);
+  (row.querySelector(".broken-check") as HTMLInputElement).addEventListener(
+    "change",
+    doSearch,
+  );
 
   async function doSearch(): Promise<void> {
     const q = input.value.trim();
     const goal = goalSelect.value;
-    const broken = (row.querySelector(".broken-check") as HTMLInputElement).checked;
+    const broken =
+      (row.querySelector(".broken-check") as HTMLInputElement).checked;
 
     results.innerHTML = '<div class="loading">Loading</div>';
 
@@ -84,7 +94,11 @@ registerPage("search", async () => {
       let data: (AtomSummary | SearchResult | CodeSearchResult)[];
       if (!q) {
         // Browse mode -- show recent atoms
-        data = await client.recent({ n: 50, goal: goal || undefined, broken: broken || undefined });
+        data = await client.recent({
+          n: 50,
+          goal: goal || undefined,
+          broken: broken || undefined,
+        });
       } else if (mode === "code") {
         data = await client.searchCode(q, 50);
       } else {
@@ -92,7 +106,9 @@ registerPage("search", async () => {
       }
 
       // Client-side filters for search results
-      if (q && goal) data = data.filter((a) => (a as AtomSummary).goal === goal);
+      if (q && goal) {
+        data = data.filter((a) => (a as AtomSummary).goal === goal);
+      }
       if (q && broken) {
         data = data.filter((a) => a.description?.startsWith("BROKEN:"));
       }
@@ -170,7 +186,9 @@ registerPage("search", async () => {
       }
       results.replaceChildren(list);
     } catch (e) {
-      results.innerHTML = `<div class="empty">Error: ${(e as Error).message}</div>`;
+      results.innerHTML = `<div class="empty">Error: ${
+        (e as Error).message
+      }</div>`;
     }
   }
 

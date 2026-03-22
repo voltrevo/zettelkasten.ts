@@ -13,9 +13,16 @@ atoms over writing new ones.
 ## Running
 
 ```sh
+# First-time setup: build the UI
+cd ui && npm install && npm run build && cd ..
+
 deno task zts run          # start server in foreground (port 8000)
 deno task test             # run unit tests
-deno task precommit        # fmt + typecheck + test + lint (run before committing)
+deno task test:integration # run integration tests (real server, in-memory DB)
+deno task test:all         # both
+deno task ui:build         # build the web UI (Vite + TypeScript)
+deno task ui:dev           # Vite dev server with HMR (proxies API to port 8000)
+deno task precommit        # fmt + typecheck + test + lint + ui build
 ```
 
 Daemon commands (systemd user unit):
@@ -150,7 +157,7 @@ zts prop list <hash>                       # list
 zts goal pick [--n N]                      # weighted random sample of active goals
 zts goal show <name>                       # full body + all comments
 zts goal list [--done] [--all]             # list goals
-zts goal done <name>                       # mark complete
+zts goal done <name>                       # mark complete (requires last comment starts with "DONE:")
 zts goal undone <name>                     # revert
 zts goal comment <name> "text"             # append observation
 zts goal comments <name> [--recent N]      # read observations
@@ -184,6 +191,17 @@ zts worker stop [flags]                    # stop a running worker
 #   --dangerously-skip-permissions, --context-prompt, --iteration-prompt,
 #   --retrospective-prompt, --workspaces-dir
 ```
+
+### Scripting
+
+```sh
+zts script '<inline code>'                 # type-check and run inline TS with zts client
+zts script -f <file.ts>                    # run from file
+zts script --types                         # print ZtsClient type definitions
+```
+
+The `zts` global is a pre-configured `ZtsClient` — no imports needed, types are
+injected automatically.
 
 All commands support `-h`/`--help` for detailed usage.
 
@@ -279,6 +297,8 @@ zts describe <hash> -d "BROKEN: <what is wrong>. <original description>"
 | -------------------- | ------------------------------------------------------------------ |
 | `src/server.ts`      | HTTP server: routes, atom storage, search, auth enforcement        |
 | `src/db.ts`          | Unified SQLite wrapper: all tables, schema migrations              |
+| `src/api-client.ts`  | Typed API client: shared by CLI and web UI                         |
+| `src/cap.ts`         | DenoCap interface: platform abstraction for subprocess/FS ops      |
 | `src/validate.ts`    | Atom validation: export count, import paths, size limit            |
 | `src/bundle.ts`      | Dependency graph walking, ZIP build/parse                          |
 | `src/minify.ts`      | Comment stripping + whitespace collapse (for size check)           |
@@ -287,8 +307,9 @@ zts describe <hash> -d "BROKEN: <what is wrong>. <original description>"
 | `src/prompts.ts`     | Compiled default agent prompts (context, iteration, retrospective) |
 | `src/worker.ts`      | Agent loop: workspace management, claude subprocess, handovers     |
 | `src/test-runner.ts` | Subprocess entry point for running test atoms against a target     |
-| `main.ts`            | CLI entry point: all subcommands                                   |
+| `main.ts`            | CLI entry point: all subcommands (uses api-client, no raw fetch)   |
 | `run.ts`             | Universal exec entry point: imports root atom's `main`, calls it   |
+| `ui/`                | Vite + TypeScript web UI (uses api-client via createCookieClient)  |
 
 ## Writing test atoms
 

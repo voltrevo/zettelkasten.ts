@@ -1,11 +1,4 @@
-import {
-  client,
-  h,
-  navigate,
-  registerPage,
-  relTime,
-  shortHash,
-} from "../app";
+import { client, h, navigate, registerPage, relTime, shortHash } from "../app";
 import { ApiError } from "@zts/api-client";
 
 registerPage("goals", async (args: string[]) => {

@@ -8,7 +8,10 @@ import {
 
 // ---- Mock transport via globalThis.fetch override ----
 
-type Handler = (path: string, init?: RequestInit) => Response | Promise<Response>;
+type Handler = (
+  path: string,
+  init?: RequestInit,
+) => Response | Promise<Response>;
 
 function mockClient(
   handler: Handler,
@@ -40,16 +43,20 @@ function mockClient(
       const val = target[prop as keyof ZtsClient];
       if (typeof val !== "function") return val;
       return (...args: unknown[]) => {
-        globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
-          const url = typeof input === "string"
-            ? input
-            : input instanceof URL
-            ? input.href
-            : input.url;
-          const path = url.replace("http://test:9999", "");
-          return Promise.resolve(handler(path, init));
-        }) as typeof globalThis.fetch;
-        const result = (val as (...a: unknown[]) => unknown).apply(target, args);
+        globalThis.fetch =
+          ((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+              ? input
+              : input instanceof URL
+              ? input.href
+              : input.url;
+            const path = url.replace("http://test:9999", "");
+            return Promise.resolve(handler(path, init));
+          }) as typeof globalThis.fetch;
+        const result = (val as (...a: unknown[]) => unknown).apply(
+          target,
+          args,
+        );
         if (result instanceof Promise) {
           return result.finally(restore);
         }
@@ -67,7 +74,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function textResponse(body: string, status = 200, headers?: Record<string, string>): Response {
+function textResponse(
+  body: string,
+  status = 200,
+  headers?: Record<string, string>,
+): Response {
   return new Response(body, {
     status,
     headers: { "content-type": "text/plain", ...headers },
@@ -79,7 +90,10 @@ function textResponse(body: string, status = 200, headers?: Record<string, strin
 Deno.test("getAtom returns source text (full hash)", async () => {
   const hash = "ab12345678901234567890123";
   const client = mockClient((path) => {
-    assertEquals(path, `/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`);
+    assertEquals(
+      path,
+      `/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`,
+    );
     return textResponse("export const x = 1;");
   });
   const src = await client.getAtom(hash);
@@ -192,7 +206,12 @@ Deno.test("search passes query and k", async () => {
   const client = mockClient((path) => {
     assertEquals(path.includes("q=gcd"), true);
     assertEquals(path.includes("k=5"), true);
-    return jsonResponse([{ hash: "a", score: 0.9, url: "/a/a", description: "gcd" }]);
+    return jsonResponse([{
+      hash: "a",
+      score: 0.9,
+      url: "/a/a",
+      description: "gcd",
+    }]);
   });
   const results = await client.search("gcd", 5);
   assertEquals(results.length, 1);
@@ -351,7 +370,12 @@ Deno.test("createGoal sends POST", async () => {
     const body = JSON.parse(init?.body as string);
     assertEquals(body.name, "new-goal");
     assertEquals(body.weight, 5);
-    return jsonResponse({ name: "new-goal", weight: 5, body: null, done: false }, 201);
+    return jsonResponse({
+      name: "new-goal",
+      weight: 5,
+      body: null,
+      done: false,
+    }, 201);
   });
   const goal = await client.createGoal("new-goal", { weight: 5 });
   assertEquals(goal.name, "new-goal");

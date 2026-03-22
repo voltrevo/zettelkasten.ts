@@ -358,7 +358,9 @@ function buildClient(
         body: source,
       })).trim();
       // Server returns /a/xx/yy/rest.ts — extract hash
-      const m = urlPath.match(/\/a\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+)\.ts/);
+      const m = urlPath.match(
+        /\/a\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+)\.ts/,
+      );
       return m ? m[1] + m[2] + m[3] : urlPath;
     },
 
@@ -674,7 +676,10 @@ globalThis.zts = createBearerClient(
 );
 ${scriptBody}
 `;
-      const tmpFile = await d.makeTempFile({ suffix: ".ts", dir: opts?.tmpDir });
+      const tmpFile = await d.makeTempFile({
+        suffix: ".ts",
+        dir: opts?.tmpDir,
+      });
       await d.writeTextFile(tmpFile, wrapper);
       try {
         // Type-check

@@ -45,7 +45,10 @@ registerPage("dashboard", async () => {
         style: "display:flex;align-items:center;gap:0.75rem;padding:0.375rem 0",
       });
       row.append(
-        h("a", { href: `#/goals/${g.name}`, style: "flex:1;font-size:0.875rem" }, g.name),
+        h("a", {
+          href: `#/goals/${g.name}`,
+          style: "flex:1;font-size:0.875rem",
+        }, g.name),
         h("span", { class: "badge badge-blue" }, `w:${g.weight}`),
         h("span", {
           style: "color:var(--text-2);font-size:0.8rem;font-family:var(--mono)",
@@ -57,7 +60,11 @@ registerPage("dashboard", async () => {
   }
 
   root.append(
-    h("h2", { class: "page-title", style: "font-size:1.1rem;margin-top:2rem" }, "Recent Activity"),
+    h(
+      "h2",
+      { class: "page-title", style: "font-size:1.1rem;margin-top:2rem" },
+      "Recent Activity",
+    ),
   );
   if (logData.length === 0) {
     root.append(h("div", { class: "empty" }, "No recent activity"));
@@ -65,18 +72,32 @@ registerPage("dashboard", async () => {
     const list = h("ul", { class: "timeline" });
     for (const entry of logData) {
       const item = h("li", { class: "timeline-item" });
-      item.append(h("span", { class: "timeline-time" }, relTime(entry.createdAt)));
+      item.append(
+        h("span", { class: "timeline-time" }, relTime(entry.createdAt)),
+      );
 
       const opColor = entry.op.includes("delete")
         ? "var(--red)"
         : entry.op.includes("create")
-          ? "var(--green)"
-          : "var(--accent)";
-      item.append(h("span", { class: "timeline-op", style: `color:${opColor}` }, entry.op));
+        ? "var(--green)"
+        : "var(--accent)";
+      item.append(
+        h(
+          "span",
+          { class: "timeline-op", style: `color:${opColor}` },
+          entry.op,
+        ),
+      );
 
       const detail = h("span", { class: "timeline-detail" });
       if (entry.subject) {
-        detail.append(h("a", { href: `#/atom/${entry.subject}`, class: "hash" }, shortHash(entry.subject)));
+        detail.append(
+          h(
+            "a",
+            { href: `#/atom/${entry.subject}`, class: "hash" },
+            shortHash(entry.subject),
+          ),
+        );
       }
       if (entry.detail) {
         detail.append(` ${entry.detail}`);
