@@ -108,7 +108,6 @@ const args = parseArgs(Deno.args, {
   },
 });
 
-const RUN_TS = new URL("./run.ts", import.meta.url).pathname;
 const [command, ...rest] = args._ as string[];
 
 const SUBCOMMAND_HELP: Record<string, string> = {
@@ -286,15 +285,17 @@ Flags:
   --iteration-prompt <file>    override iteration prompt from file
   --retrospective-prompt <file>  override retrospective prompt from file`,
 
-  script: `zts script <file.ts>
-  Type-check and run a TypeScript file with a pre-configured ZtsClient
-  available as the global 'zts'. No imports needed — types are injected
-  automatically.
+  script: `zts script '<inline code>'
+  zts script -f <file.ts>
+  zts script --types
 
-  Example:
-    // myscript.ts
-    const atoms = await zts.recent({ n: 5 });
-    console.log(atoms);`,
+  Type-check and run TypeScript with a pre-configured ZtsClient available
+  as the global 'zts'. No imports needed — types are injected automatically.
+
+  Examples:
+    zts script 'console.log(await zts.recent({ n: 5 }))'
+    zts script -f myscript.ts
+    zts script --types    # print ZtsClient type definitions`,
 };
 
 // Check for per-subcommand help
@@ -447,19 +448,22 @@ switch (command) {
     break;
 
   case "script": {
-    const scriptFile = rest[0];
-    if (args.types || scriptFile === "--types") {
+    if (args.types) {
       console.log(await client.scriptTypes());
       break;
     }
-    if (!scriptFile) {
-      console.error("usage: zts script <file.ts>");
-      console.error(
-        "       zts script --types    print ZtsClient type definitions",
-      );
+    const code = rest.join(" ").trim();
+    if (!code) {
+      console.error("usage: zts script '<inline code>'");
+      console.error("       zts script -f <file.ts>");
+      console.error("       zts script --types");
       Deno.exit(1);
     }
-    const result = await client.script(scriptFile);
+    const isFile = !!args.f;
+    const result = await client.script(
+      isFile ? code : code,
+      { file: isFile },
+    );
     if (result.code !== 0) {
       Deno.exit(result.code);
     }
@@ -537,7 +541,8 @@ Agent loop:
   worker stop                  stop a running worker
 
 Scripting:
-  script <file.ts>             run script with pre-configured client at globalThis.zts
+  script '<code>'              type-check and run inline TypeScript with zts client
+  script -f <file.ts>          run script from file
 
 Server:
   run                          start server in foreground
@@ -1459,18 +1464,21 @@ async function cmdShowPrompt(rest: string[]): Promise<void> {
     );
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/prompts/${name}`);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+  try {
+    const result = await client.getPrompt(name);
+    if (result.source === "override") {
+      console.error(
+        `(using override — pass --default to see compiled default)\n`,
+      );
+    }
+    console.log(result.text);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  const source = res.headers.get("x-prompt-source");
-  if (source === "override") {
-    console.error(
-      `(using override — run with ?default=1 to see compiled default)\n`,
-    );
-  }
-  console.log(await res.text());
 }
 
 async function cmdSize(rest: string[]): Promise<void> {
@@ -1562,23 +1570,16 @@ async function cmdRelate(rest: string[]): Promise<void> {
     console.error("       zts relate <new> supersedes <old>");
     Deno.exit(1);
   }
-  // Keep raw fetch to distinguish 201 (created) vs 200 (already exists)
-  const token = Deno.env.get("ZTS_ADMIN_TOKEN") ??
-    Deno.env.get("ZTS_DEV_TOKEN");
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-  };
-  if (token) headers["authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${BASE_URL}/relationships`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ from, to, kind }),
-  });
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+  try {
+    const result = await client.addRelationship(from, kind, to);
+    console.log(result === "created" ? "created" : "already exists");
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  console.log(res.status === 201 ? "created" : "already exists");
 }
 
 async function cmdUnrelate(rest: string[]): Promise<void> {
@@ -1601,22 +1602,6 @@ async function cmdUnrelate(rest: string[]): Promise<void> {
   }
 }
 
-async function spawnRun(
-  scriptPath: string,
-  atomUrl: string,
-  ...scriptArgs: string[]
-): Promise<void> {
-  const proc = new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-all", "--no-lock", scriptPath, ...scriptArgs],
-    env: { ...Deno.env.toObject(), ZTS_EXEC_URL: atomUrl },
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "inherit",
-  });
-  const { code } = await proc.output();
-  if (code !== 0) Deno.exit(code);
-}
-
 async function cmdExec(rest: string[]): Promise<void> {
   const ref = rest[0];
   if (!ref) {
@@ -1624,37 +1609,21 @@ async function cmdExec(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
 
-  if (ref.endsWith(".zip")) {
-    await execBundle(ref);
-  } else {
-    const url = `${BASE_URL}/a/${ref.slice(0, 2)}/${ref.slice(2, 4)}/${
-      ref.slice(4)
-    }.ts`;
-    await spawnRun(RUN_TS, url, ...rest.slice(1));
-  }
-}
-
-async function execBundle(zipFile: string): Promise<void> {
-  const zipData = await Deno.readFile(zipFile);
-  const files = parseZip(zipData);
-
-  const tmpDir = await Deno.makeTempDir({ prefix: "zts-" });
   try {
-    for (const [path, data] of files) {
-      const fullPath = `${tmpDir}/${path}`;
-      await Deno.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
-      await Deno.writeFile(fullPath, data);
+    let result;
+    if (ref.endsWith(".zip")) {
+      const zipData = await Deno.readFile(ref);
+      result = await client.execBundle(zipData);
+    } else {
+      result = await client.exec(ref, rest.slice(1));
     }
-
-    const runTsRel = [...files.keys()].find((p) => p.endsWith("/run.ts"));
-    if (!runTsRel) {
-      console.error("error: bundle has no run.ts entry point");
+    if (result.code !== 0) Deno.exit(result.code);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
       Deno.exit(1);
     }
-
-    await spawnRun(`${tmpDir}/${runTsRel}`, "");
-  } finally {
-    await Deno.remove(tmpDir, { recursive: true });
+    throw e;
   }
 }
 
@@ -1684,13 +1653,16 @@ async function cmdBundle(rest: string[]): Promise<void> {
       throw e;
     }
   } else {
-    // Raw fetch for stdout pipe — need streaming body
-    const res = await fetch(`${BASE_URL}/bundle/${hash}`);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      const zipData = await client.getBundle(hash);
+      await Deno.stdout.write(zipData);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    await res.body!.pipeTo(Deno.stdout.writable);
   }
 }
 
@@ -1797,9 +1769,18 @@ async function cmdTest(rest: string[]): Promise<void> {
     console.error("usage: zts test <hash>");
     Deno.exit(1);
   }
-  let rels;
   try {
-    rels = await client.queryRelationships({ to: hash, kind: "tests" });
+    const results = await client.runTests(hash);
+    if (results.length === 0) {
+      console.log("no tests registered for " + hash);
+      return;
+    }
+    const allPassed = results.every((r) => r.passed);
+    for (const r of results) {
+      console.log(`${r.testAtom}  ${r.passed ? "pass" : "FAIL"}`);
+      if (r.error) console.error(r.error);
+    }
+    if (!allPassed) Deno.exit(1);
   } catch (e) {
     if (e instanceof ApiError) {
       console.error(`error: ${e.status} ${e.message}`);
@@ -1807,32 +1788,6 @@ async function cmdTest(rest: string[]): Promise<void> {
     }
     throw e;
   }
-  if (rels.length === 0) {
-    console.log("no tests registered for " + hash);
-    return;
-  }
-  const testHashes = rels.map((r) => r.from);
-  const serverHost = new URL(BASE_URL).host;
-  const runnerPath = new URL("./src/test-runner.ts", import.meta.url).pathname;
-  const proc = new Deno.Command(Deno.execPath(), {
-    args: [
-      "test",
-      `--allow-import=${serverHost}`,
-      "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
-      "--no-lock",
-      runnerPath,
-    ],
-    env: {
-      ...Deno.env.toObject(),
-      ZTS_SERVER_URL: BASE_URL,
-      ZTS_TARGET: hash,
-      ZTS_TESTS: testHashes.join(","),
-    },
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await proc.output();
-  Deno.exit(code);
 }
 
 async function readAll(

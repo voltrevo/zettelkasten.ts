@@ -2,24 +2,12 @@
  * Typed API client for the zettelkasten server.
  * Works in both Deno (CLI, bearer auth) and browser (cookie auth).
  *
- * Subprocess operations (exec, test) require a DenoCap to be provided.
+ * Subprocess operations (exec, test, script) require a DenoCap to be provided.
  */
 
-// ---- Capability types ----
-
-export interface DenoCap {
-  execPath(): string;
-  cwd(): string;
-  env: {
-    get(key: string): string | undefined;
-    toObject(): Record<string, string>;
-  };
-  Command: typeof Deno.Command;
-  readTextFile(path: string | URL): Promise<string>;
-  writeTextFile(path: string | URL, data: string): Promise<void>;
-  makeTempFile(options?: { suffix?: string; dir?: string }): Promise<string>;
-  remove(path: string | URL): Promise<void>;
-}
+export type { DenoCap } from "./cap.ts";
+import type { DenoCap } from "./cap.ts";
+import { parseZip } from "./bundle.ts";
 
 // ---- Response types ----
 
@@ -209,7 +197,7 @@ export interface ZtsClient {
     from: string,
     kind: string,
     to: string,
-  ): Promise<void>;
+  ): Promise<"created" | "exists">;
   removeRelationship(
     from: string,
     kind: string,
@@ -287,9 +275,11 @@ export interface ZtsClient {
   ): Promise<ExecResult>;
   runTests(hash: string): Promise<TestResult[]>;
 
+  execBundle(zipData: Uint8Array): Promise<ExecResult>;
+
   // Scripting
   scriptTypes(): Promise<string>;
-  script(file: string): Promise<ExecResult>;
+  script(fileOrCode: string, opts?: { file?: boolean }): Promise<ExecResult>;
 }
 
 // ---- Transport abstraction ----
@@ -413,12 +403,16 @@ function buildClient(
         })
       }`),
 
-    addRelationship: (from, kind, to) =>
-      ok("/relationships", {
+    async addRelationship(from, kind, to) {
+      const res = await transport.fetch("/relationships", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ from, kind, to }),
-      }),
+      });
+      if (!res.ok) throw new ApiError(res.status, await res.text());
+      await res.body?.cancel();
+      return res.status === 201 ? "created" : "exists";
+    },
 
     removeRelationship: (from, kind, to) =>
       ok("/relationships", {
@@ -613,6 +607,33 @@ function buildClient(
       return { code };
     },
 
+    async execBundle(zipData) {
+      const d = opts?.deno;
+      if (!d) throw new Error("execBundle requires DenoCap");
+      const files = parseZip(zipData);
+      const tmpDir = await d.makeTempDir({ prefix: "zts-" });
+      try {
+        for (const [path, data] of files) {
+          const fullPath = `${tmpDir}/${path}`;
+          await d.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
+          await d.writeFile(fullPath, data);
+        }
+        const runTsRel = [...files.keys()].find((p) => p.endsWith("/run.ts"));
+        if (!runTsRel) throw new Error("bundle has no run.ts entry point");
+        const proc = new d.Command(d.execPath(), {
+          args: ["run", "--allow-all", "--no-lock", `${tmpDir}/${runTsRel}`],
+          env: { ...d.env.toObject(), ZTS_EXEC_URL: "" },
+          stdout: "inherit",
+          stderr: "inherit",
+          stdin: "inherit",
+        });
+        const { code } = await proc.output();
+        return { code };
+      } finally {
+        await d.remove(tmpDir, { recursive: true });
+      }
+    },
+
     async scriptTypes() {
       const d = opts?.deno;
       if (!d) throw new Error("scriptTypes requires DenoCap");
@@ -622,12 +643,27 @@ function buildClient(
       return cutoff > 0 ? src.slice(0, cutoff).trim() : src;
     },
 
-    async script(file) {
+    async script(fileOrCode, scriptOpts) {
       const d = opts?.deno;
       const base = opts?.baseUrl;
       if (!d || !base) throw new Error("script requires DenoCap and baseUrl");
-      const scriptPath = file.startsWith("/") ? file : `${d.cwd()}/${file}`;
+      const isFile = scriptOpts?.file ?? false;
       const clientMod = new URL("./api-client.ts", import.meta.url).pathname;
+      let scriptBody: string;
+      if (isFile) {
+        const scriptPath = fileOrCode.startsWith("/")
+          ? fileOrCode
+          : `${d.cwd()}/${fileOrCode}`;
+        scriptBody = `await import("${scriptPath}");`;
+      } else {
+        // Write inline code to a temp file, import that
+        const codeTmp = await d.makeTempFile({
+          suffix: ".ts",
+          dir: opts?.tmpDir,
+        });
+        await d.writeTextFile(codeTmp, fileOrCode);
+        scriptBody = `await import("${codeTmp}");`;
+      }
       const wrapper = `\
 import { createBearerClient, type ZtsClient } from "${clientMod}";
 declare global { var zts: ZtsClient; }
@@ -636,7 +672,7 @@ globalThis.zts = createBearerClient(
   { dev: Deno.env.get("ZTS_DEV_TOKEN"), admin: Deno.env.get("ZTS_ADMIN_TOKEN") },
   Deno,
 );
-await import("${scriptPath}");
+${scriptBody}
 `;
       const tmpFile = await d.makeTempFile({ suffix: ".ts", dir: opts?.tmpDir });
       await d.writeTextFile(tmpFile, wrapper);

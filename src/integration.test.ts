@@ -675,25 +675,29 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Scripting (last — slow due to subprocess) ----
 
-    await timed(t,"script: type-checks and runs", async () => {
-      const scriptPath = `${TMP_DIR}/test-script.ts`;
-      await Deno.writeTextFile(
-        scriptPath,
+    await timed(t,"script: inline type-checks and runs", async () => {
+      const code =
         `const atoms = await zts.recent({ n: 1 });\n` +
-          `if (atoms.length !== 1) throw new Error("expected 1 atom, got " + atoms.length);\n` +
-          `if (!atoms[0].hash) throw new Error("missing hash");\n`,
-      );
-      const result = await client.script(scriptPath);
+        `if (atoms.length !== 1) throw new Error("expected 1 atom, got " + atoms.length);\n` +
+        `if (!atoms[0].hash) throw new Error("missing hash");\n`;
+      const result = await client.script(code);
       assertEquals(result.code, 0);
     }, SUBPROCESS);
 
-    await timed(t,"script: type error fails check", async () => {
-      const scriptPath = `${TMP_DIR}/bad-script.ts`;
+    await timed(t,"script: file mode", async () => {
+      const scriptPath = `${TMP_DIR}/file-script.ts`;
       await Deno.writeTextFile(
         scriptPath,
+        `const s = await zts.getStatus();\nif (!s.totalAtoms && s.totalAtoms !== 0) throw new Error("bad status");\n`,
+      );
+      const result = await client.script(scriptPath, { file: true });
+      assertEquals(result.code, 0);
+    }, SUBPROCESS);
+
+    await timed(t,"script: inline type error fails check", async () => {
+      const result = await client.script(
         `const x: number = await zts.recent();\n`,
       );
-      const result = await client.script(scriptPath);
       console.log("  (type checking error above is expected — testing that bad scripts are rejected)");
       assertEquals(result.code !== 0, true);
     }, SUBPROCESS);
