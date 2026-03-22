@@ -1,9 +1,10 @@
 #!/bin/sh
 set -e
 
-CONFIG="/data/config.json5"
+DATA_DIR="/data/.local/share/zettelkasten"
+CONFIG="$DATA_DIR/config.json5"
 
-mkdir -p /data
+mkdir -p "$DATA_DIR"
 
 # Generate config on first run
 if [ ! -f "$CONFIG" ]; then

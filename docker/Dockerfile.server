@@ -27,6 +27,7 @@ RUN deno eval "import { Database } from '@db/sqlite'; new Database(':memory:').c
 # Data directory — mounted as volume
 RUN mkdir -p /data
 
+ENV HOME=/data
 EXPOSE 7483
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

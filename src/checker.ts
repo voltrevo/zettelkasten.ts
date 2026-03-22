@@ -109,6 +109,40 @@ async function handleCheck(req: Request): Promise<Response> {
   });
 }
 
+async function handleLint(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+  const source = await req.text();
+  if (!source) {
+    return new Response("Empty source", { status: 400 });
+  }
+
+  const lintDir = "/tmp/zts-lint";
+  await Deno.mkdir(lintDir, { recursive: true });
+  const tmpFile = await Deno.makeTempFile({ suffix: ".ts", dir: lintDir });
+  try {
+    await Deno.writeTextFile(tmpFile, source);
+    const proc = new Deno.Command(Deno.execPath(), {
+      args: ["lint", "--compact", tmpFile],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const output = await proc.output();
+    const passed = output.code === 0;
+    const text = new TextDecoder().decode(output.stdout) +
+      new TextDecoder().decode(output.stderr);
+
+    return new Response(JSON.stringify({ passed, diagnostics: text.trim() }), {
+      headers: { "content-type": "application/json" },
+    });
+  } finally {
+    await Deno.remove(tmpFile).catch((e) =>
+      console.error(`warning: failed to clean up ${tmpFile}: ${e.message}`)
+    );
+  }
+}
+
 function handler(req: Request): Promise<Response> | Response {
   const url = new URL(req.url);
   if (url.pathname === "/health") {
@@ -118,6 +152,9 @@ function handler(req: Request): Promise<Response> | Response {
   }
   if (url.pathname === "/check") {
     return handleCheck(req);
+  }
+  if (url.pathname === "/lint") {
+    return handleLint(req);
   }
   return new Response("Not found", { status: 404 });
 }

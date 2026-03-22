@@ -324,6 +324,28 @@ async function route(req: Request): Promise<Response> {
       return new Response(validationError.message, { status: 422 });
     }
 
+    // Lint check via checker service
+    try {
+      const lintRes = await fetch(`${checkerUrl}/lint`, {
+        method: "POST",
+        body: content,
+      });
+      const lint = await lintRes.json() as {
+        passed: boolean;
+        diagnostics: string;
+      };
+      if (!lint.passed) {
+        return new Response(`Lint errors:\n${lint.diagnostics}`, {
+          status: 422,
+        });
+      }
+    } catch (e) {
+      return new Response(
+        `Lint check failed: checker unreachable (${(e as Error).message})`,
+        { status: 503 },
+      );
+    }
+
     const hash = contentHash(content);
     const urlPath = hashToUrlPath(hash);
 
