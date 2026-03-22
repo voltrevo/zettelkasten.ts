@@ -31,10 +31,24 @@ The first line(s) of every atom must be a comment containing the description,
 identical to what is passed via -d. Comments are stripped by the minifier and
 cost nothing against the size limit.
 
-## Cap convention
+## Platform API rules
 
-Atoms needing external capabilities (I/O, time, randomness, fetch) accept them
-as an explicit cap first argument and export a Cap type.
+Use standard JS built-ins freely (Array, Map, Uint8Array, Math.sqrt, BigInt,
+TextEncoder/TextDecoder, JSON, etc.).
+
+Atoms that need external state or I/O (console, filesystem, raw TCP sockets,
+randomness, wall-clock time) must accept these as an explicit cap parameter
+so tests can substitute them.
+
+Do NOT use — build these as atoms from scratch:
+- crypto.subtle / WebCrypto (SHA, AES, HMAC, x25519, etc.)
+- CompressionStream / DecompressionStream (deflate, inflate, gzip)
+- WebSocket (frame parsing, masking, handshake)
+- fetch / HTTP client (request framing, chunked encoding)
+- TLS (handshake, AEAD encryption, certificate validation)
+
+These are the algorithms the corpus exists to accumulate. Using platform
+implementations defeats the purpose.
 
 ## CLI
 
