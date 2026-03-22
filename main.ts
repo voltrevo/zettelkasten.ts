@@ -9,8 +9,13 @@ import {
   stopWorker,
   type WorkerConfig,
 } from "./src/worker.ts";
+import { ApiError, createBearerClient } from "./src/api-client.ts";
 
 const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
+const client = createBearerClient(BASE_URL, {
+  dev: Deno.env.get("ZTS_DEV_TOKEN"),
+  admin: Deno.env.get("ZTS_ADMIN_TOKEN"),
+}, Deno);
 
 function checkServerEnv(): void {
   const missing: string[] = [];
@@ -37,28 +42,6 @@ async function writeEnvFile(): Promise<void> {
     await Deno.mkdir(DATA_DIR, { recursive: true });
     await Deno.writeTextFile(ENV_FILE, lines.join("\n") + "\n");
   }
-}
-
-function devHeaders(extra?: Record<string, string>): Record<string, string> {
-  const token = Deno.env.get("ZTS_DEV_TOKEN");
-  if (!token) {
-    console.error(
-      "error: ZTS_DEV_TOKEN is not set. Export it to use write commands.",
-    );
-    Deno.exit(1);
-  }
-  return { authorization: `Bearer ${token}`, ...extra };
-}
-
-function adminHeaders(extra?: Record<string, string>): Record<string, string> {
-  const token = Deno.env.get("ZTS_ADMIN_TOKEN");
-  if (!token) {
-    console.error(
-      "error: ZTS_ADMIN_TOKEN is not set. Export it to use admin commands.",
-    );
-    Deno.exit(1);
-  }
-  return { authorization: `Bearer ${token}`, ...extra };
 }
 
 const UNIT_NAME = "zettelkasten";
@@ -302,6 +285,16 @@ Flags:
   --context-prompt <file>      override context prompt from file
   --iteration-prompt <file>    override iteration prompt from file
   --retrospective-prompt <file>  override retrospective prompt from file`,
+
+  script: `zts script <file.ts>
+  Type-check and run a TypeScript file with a pre-configured ZtsClient
+  available as the global 'zts'. No imports needed — types are injected
+  automatically.
+
+  Example:
+    // myscript.ts
+    const atoms = await zts.recent({ n: 5 });
+    console.log(atoms);`,
 };
 
 // Check for per-subcommand help
@@ -453,6 +446,26 @@ switch (command) {
     await cmdWorker(rest);
     break;
 
+  case "script": {
+    const scriptFile = rest[0];
+    if (args.types || scriptFile === "--types") {
+      console.log(await client.scriptTypes());
+      break;
+    }
+    if (!scriptFile) {
+      console.error("usage: zts script <file.ts>");
+      console.error(
+        "       zts script --types    print ZtsClient type definitions",
+      );
+      Deno.exit(1);
+    }
+    const result = await client.script(scriptFile);
+    if (result.code !== 0) {
+      Deno.exit(result.code);
+    }
+    break;
+  }
+
   default:
     console.error(`usage: zts <command> [options]
 
@@ -522,6 +535,9 @@ Agent loop:
   worker setup                 create workspace for a channel
   worker [run]                 start the agent loop
   worker stop                  stop a running worker
+
+Scripting:
+  script <file.ts>             run script with pre-configured client at globalThis.zts
 
 Server:
   run                          start server in foreground
@@ -654,30 +670,26 @@ async function cmdServerLog(): Promise<void> {
 }
 
 async function cmdAuditLog(): Promise<void> {
-  const url = new URL(`${BASE_URL}/log`);
-  if (args.recent) url.searchParams.set("recent", args.recent);
-  if (args.op) url.searchParams.set("op", args.op);
-  if (args.subject) url.searchParams.set("subject", args.subject);
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const entries = await res.json() as Array<{
-    id: number;
-    op: string;
-    subject: string | null;
-    detail: string | null;
-    actor: string | null;
-    createdAt: string;
-  }>;
-  if (entries.length === 0) {
-    console.log("no log entries");
-    return;
-  }
-  for (const e of entries) {
-    const detail = e.detail ? `  ${e.detail}` : "";
-    console.log(`${e.op}  ${e.subject ?? ""}${detail}  ${e.createdAt}`);
+  try {
+    const entries = await client.getLog({
+      recent: args.recent ? parseInt(args.recent, 10) : undefined,
+      op: args.op,
+      subject: args.subject,
+    });
+    if (entries.length === 0) {
+      console.log("no log entries");
+      return;
+    }
+    for (const e of entries) {
+      const detail = e.detail ? `  ${e.detail}` : "";
+      console.log(`${e.op}  ${e.subject ?? ""}${detail}  ${e.createdAt}`);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -687,28 +699,27 @@ async function cmdRuns(rest: string[]): Promise<void> {
     console.error("usage: zts runs <hash> [--recent N]");
     Deno.exit(1);
   }
-  const url = new URL(`${BASE_URL}/test-runs`);
-  url.searchParams.set("target", hash);
-  if (args.recent) url.searchParams.set("recent", args.recent);
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const runs = await res.json() as Array<{
-    testAtom: string;
-    result: string;
-    durationMs: number | null;
-    runBy: string;
-    ranAt: string;
-  }>;
-  if (runs.length === 0) {
-    console.log("no test runs");
-    return;
-  }
-  for (const r of runs) {
-    const ms = r.durationMs !== null ? `${r.durationMs}ms` : "?ms";
-    console.log(`${r.testAtom}  ${r.result}  ${ms}  ${r.runBy}  ${r.ranAt}`);
+  try {
+    const runs = await client.getTestRuns({
+      target: hash,
+      recent: args.recent ? parseInt(args.recent, 10) : undefined,
+    });
+    if (runs.length === 0) {
+      console.log("no test runs");
+      return;
+    }
+    for (const r of runs) {
+      const ms = r.durationMs !== null ? `${r.durationMs}ms` : "?ms";
+      console.log(
+        `${r.testAtom}  ${r.result}  ${ms}  ${r.runBy}  ${r.ranAt}`,
+      );
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -718,16 +729,16 @@ async function cmdGet(rest: string[]): Promise<void> {
     console.error("usage: zts get <path|hash>");
     Deno.exit(1);
   }
-  const url = ref.startsWith("/")
-    ? `${BASE_URL}${ref}`
-    : `${BASE_URL}/a/${ref.slice(0, 2)}/${ref.slice(2, 4)}/${ref.slice(4)}.ts`;
-
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${res.statusText}`);
-    Deno.exit(1);
+  try {
+    const source = await client.getAtom(ref);
+    await Deno.stdout.write(new TextEncoder().encode(source));
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  await res.body!.pipeTo(Deno.stdout.writable);
 }
 
 async function cmdPost(rest: string[]): Promise<void> {
@@ -758,29 +769,21 @@ async function cmdPost(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
 
-  const headers: Record<string, string> = devHeaders();
-  if (description) {
-    headers["x-description"] = description;
-  } else {
-    headers["x-allow-no-description"] = "true";
+  try {
+    const hash = await client.postAtom(content, {
+      description: description || undefined,
+      allowNoDescription: !description ? true : undefined,
+      tests: args.t || undefined,
+      goal: args.g || undefined,
+    });
+    console.log(hash);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  if (args.t) {
-    headers["x-require-tests"] = args.t;
-  }
-  if (args.g) {
-    headers["x-goal"] = args.g;
-  }
-
-  const res = await fetch(`${BASE_URL}/a`, {
-    method: "POST",
-    headers,
-    body: content,
-  });
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  console.log((await res.text()).trim());
 }
 
 async function cmdDelete(rest: string[]): Promise<void> {
@@ -789,50 +792,45 @@ async function cmdDelete(rest: string[]): Promise<void> {
     console.error("usage: zts delete <hash>");
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/a/${hash}`, {
-    method: "DELETE",
-    headers: devHeaders(),
-  });
-  if (res.status === 204) {
+  try {
+    await client.deleteAtom(hash);
     console.log("deleted");
-  } else if (res.status === 409) {
-    console.error(`error: ${await res.text()}`);
-    Deno.exit(1);
-  } else if (res.status === 404) {
-    console.error("error: atom not found");
-    Deno.exit(1);
-  } else {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      if (e.status === 404) {
+        console.error("error: atom not found");
+      } else {
+        console.error(`error: ${e.message}`);
+      }
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
 async function cmdRecent(): Promise<void> {
-  const url = new URL(`${BASE_URL}/recent`);
-  if (args.n) url.searchParams.set("n", args.n);
-  if (args.all) url.searchParams.set("all", "1");
-  if (args.goal) url.searchParams.set("goal", args.goal);
-  if (args.broken) url.searchParams.set("broken", "1");
-  if (args.prop) url.searchParams.set("prop", args.prop);
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const atoms = await res.json() as Array<{
-    hash: string;
-    description: string;
-    goal: string | null;
-    gzipSize: number;
-    createdAt: string;
-  }>;
-  if (atoms.length === 0) {
-    console.log("no atoms");
-    return;
-  }
-  for (const a of atoms) {
-    const goal = a.goal ? ` [${a.goal}]` : "";
-    console.log(`${a.hash}  ${a.description}${goal}`);
+  try {
+    const atoms = await client.recent({
+      n: args.n ? parseInt(args.n, 10) : undefined,
+      goal: args.goal,
+      broken: args.broken,
+      prop: args.prop,
+      all: args.all,
+    });
+    if (atoms.length === 0) {
+      console.log("no atoms");
+      return;
+    }
+    for (const a of atoms) {
+      const goal = a.goal ? ` [${a.goal}]` : "";
+      console.log(`${a.hash}  ${a.description}${goal}`);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -842,60 +840,41 @@ async function cmdInfo(rest: string[]): Promise<void> {
     console.error("usage: zts info <hash>");
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/info/${hash}`);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+  try {
+    const info = await client.info(hash);
+    console.log(`hash:        ${info.hash}`);
+    console.log(`url:         ${info.url}`);
+    console.log(`description: ${info.description}`);
+    console.log(`size:        ${info.gzipSize} bytes (min+gz)`);
+    if (info.goal) console.log(`goal:        ${info.goal}`);
+    console.log(`created:     ${info.createdAt}`);
+    if (info.imports.length > 0) {
+      console.log(`imports:     ${info.imports.join(", ")}`);
+    }
+    if (info.importedBy.length > 0) {
+      console.log(`imported by: ${info.importedBy.join(", ")}`);
+    }
+    if (info.testedBy.length > 0) {
+      console.log(`tested by:   ${info.testedBy.join(", ")}`);
+    }
+    if (info.properties.length > 0) {
+      const propStr = info.properties.map((p) =>
+        p.value ? `${p.key}=${p.value}` : p.key
+      ).join(", ");
+      console.log(`properties:  ${propStr}`);
+    }
+    if (info.tests.length > 0) {
+      console.log(`tests:       ${info.tests.join(", ")}`);
+    }
+    console.log("---");
+    console.log(info.source);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  const info = await res.json() as {
-    hash: string;
-    url: string;
-    source: string;
-    description: string;
-    gzipSize: number;
-    goal: string | null;
-    createdAt: string;
-    imports: string[];
-    importedBy: string[];
-    tests: string[];
-    testedBy: string[];
-    properties: { key: string; value: string | null }[];
-  };
-  console.log(`hash:        ${info.hash}`);
-  console.log(`url:         ${info.url}`);
-  console.log(`description: ${info.description}`);
-  console.log(`size:        ${info.gzipSize} bytes (min+gz)`);
-  if (info.goal) console.log(`goal:        ${info.goal}`);
-  console.log(`created:     ${info.createdAt}`);
-  if (info.imports.length > 0) {
-    console.log(`imports:     ${info.imports.join(", ")}`);
-  }
-  if (info.importedBy.length > 0) {
-    console.log(`imported by: ${info.importedBy.join(", ")}`);
-  }
-  if (info.testedBy.length > 0) {
-    console.log(`tested by:   ${info.testedBy.join(", ")}`);
-  }
-  if (info.properties.length > 0) {
-    const propStr = info.properties.map((p) =>
-      p.value ? `${p.key}=${p.value}` : p.key
-    ).join(", ");
-    console.log(`properties:  ${propStr}`);
-  }
-  if (info.tests.length > 0) {
-    console.log(`tests:       ${info.tests.join(", ")}`);
-  }
-  console.log("---");
-  console.log(info.source);
-}
-
-const ADMIN_ONLY_PROPS = new Set(["starred"]);
-
-function propHeaders(
-  key: string,
-  extra?: Record<string, string>,
-): Record<string, string> {
-  return ADMIN_ONLY_PROPS.has(key) ? adminHeaders(extra) : devHeaders(extra);
 }
 
 async function cmdProp(rest: string[]): Promise<void> {
@@ -908,16 +887,16 @@ async function cmdProp(rest: string[]): Promise<void> {
       console.error("usage: zts prop set <hash> <key> [value]");
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/properties`, {
-      method: "POST",
-      headers: propHeaders(key, { "content-type": "application/json" }),
-      body: JSON.stringify({ hash, key, value }),
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      await client.setProperty(hash, key, value);
+      console.log("ok");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    console.log("ok");
   } else if (sub === "unset") {
     const hash = rest[1];
     const key = rest[2];
@@ -925,38 +904,37 @@ async function cmdProp(rest: string[]): Promise<void> {
       console.error("usage: zts prop unset <hash> <key>");
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/properties`, {
-      method: "DELETE",
-      headers: propHeaders(key, { "content-type": "application/json" }),
-      body: JSON.stringify({ hash, key }),
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      await client.unsetProperty(hash, key);
+      console.log("removed");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    console.log("removed");
   } else if (sub === "list") {
     const hash = rest[1];
     if (!hash) {
       console.error("usage: zts prop list <hash>");
       Deno.exit(1);
     }
-    const url = new URL(`${BASE_URL}/properties`);
-    url.searchParams.set("hash", hash);
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
-    }
-    const props = await res.json() as Array<
-      { key: string; value: string | null }
-    >;
-    if (props.length === 0) {
-      console.log("no properties");
-      return;
-    }
-    for (const p of props) {
-      console.log(p.value ? `${p.key}=${p.value}` : p.key);
+    try {
+      const props = await client.listProperties(hash);
+      if (props.length === 0) {
+        console.log("no properties");
+        return;
+      }
+      for (const p of props) {
+        console.log(p.value ? `${p.key}=${p.value}` : p.key);
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
   } else {
     console.error("usage: zts prop <set|unset|list> ...");
@@ -971,20 +949,20 @@ async function cmdViolatesIntent(rest: string[]): Promise<void> {
     console.error("usage: zts violates_intent <test-hash> <atom-hash>");
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/test-evaluation`, {
-    method: "POST",
-    headers: devHeaders({ "content-type": "application/json" }),
-    body: JSON.stringify({
+  try {
+    await client.setTestEvaluation({
       test: testHash,
       target: targetHash,
-      expected_outcome: "violates_intent",
-    }),
-  });
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+      expectedOutcome: "violates_intent",
+    });
+    console.log("registered: violates_intent");
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  console.log("registered: violates_intent");
 }
 
 async function cmdFallsShort(rest: string[]): Promise<void> {
@@ -994,20 +972,20 @@ async function cmdFallsShort(rest: string[]): Promise<void> {
     console.error("usage: zts falls_short <test-hash> <atom-hash>");
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/test-evaluation`, {
-    method: "POST",
-    headers: devHeaders({ "content-type": "application/json" }),
-    body: JSON.stringify({
+  try {
+    await client.setTestEvaluation({
       test: testHash,
       target: targetHash,
-      expected_outcome: "falls_short",
-    }),
-  });
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+      expectedOutcome: "falls_short",
+    });
+    console.log("registered: falls_short");
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  console.log("registered: falls_short");
 }
 
 async function cmdEval(rest: string[]): Promise<void> {
@@ -1019,24 +997,23 @@ async function cmdEval(rest: string[]): Promise<void> {
       console.error("usage: zts eval show <test> <target>");
       Deno.exit(1);
     }
-    const url = new URL(`${BASE_URL}/test-evaluation`);
-    url.searchParams.set("test", testHash);
-    url.searchParams.set("target", targetHash);
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      const ev = await client.getTestEvaluation(testHash, targetHash);
+      if (!ev) {
+        console.error("error: 404 not found");
+        Deno.exit(1);
+      }
+      console.log(`test:     ${ev.testAtom}`);
+      console.log(`target:   ${ev.targetAtom}`);
+      console.log(`expected: ${ev.expectedOutcome}`);
+      if (ev.commentary) console.log(`comment:  ${ev.commentary}`);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    const ev = await res.json() as {
-      testAtom: string;
-      targetAtom: string;
-      expectedOutcome: string;
-      commentary: string | null;
-    };
-    console.log(`test:     ${ev.testAtom}`);
-    console.log(`target:   ${ev.targetAtom}`);
-    console.log(`expected: ${ev.expectedOutcome}`);
-    if (ev.commentary) console.log(`comment:  ${ev.commentary}`);
   } else if (sub === "set") {
     const testHash = rest[1];
     const targetHash = rest[2];
@@ -1053,21 +1030,21 @@ async function cmdEval(rest: string[]): Promise<void> {
       );
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/test-evaluation`, {
-      method: "POST",
-      headers: devHeaders({ "content-type": "application/json" }),
-      body: JSON.stringify({
+    try {
+      await client.setTestEvaluation({
         test: testHash,
         target: targetHash,
-        expected_outcome: expected,
+        expectedOutcome: expected,
         commentary: args.commentary,
-      }),
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+      });
+      console.log("ok");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    console.log("ok");
   } else {
     console.error("usage: zts eval <show|set> ...");
     Deno.exit(1);
@@ -1080,33 +1057,36 @@ async function cmdTops(rest: string[]): Promise<void> {
     console.error("usage: zts tops <hash> [--limit N] [--all]");
     Deno.exit(1);
   }
-  const url = new URL(`${BASE_URL}/tops/${hash}`);
-  if (args.limit) url.searchParams.set("limit", args.limit);
-  if (args.all) url.searchParams.set("all", "1");
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const tops = await res.json() as Array<{
-    hash: string;
-    depth: number;
-    description: string;
-  }>;
-  if (tops.length === 1 && tops[0].depth === 0) {
-    console.log(
-      `${tops[0].hash} is already a top — not superseded by anything.`,
-    );
-    return;
-  }
-  console.log(`${tops.length} top(s) found.\n`);
-  let currentDepth = -1;
-  for (const t of tops) {
-    if (t.depth !== currentDepth) {
-      currentDepth = t.depth;
-      console.log(`Depth ${currentDepth}:`);
+  try {
+    const tops = await client.tops(hash, {
+      limit: args.limit ? parseInt(args.limit, 10) : undefined,
+      all: args.all,
+    }) as Array<{ hash: string; depth: number; description: string }>;
+    if (tops.length === 1 && (tops[0] as { depth: number }).depth === 0) {
+      console.log(
+        `${tops[0].hash} is already a top — not superseded by anything.`,
+      );
+      return;
     }
-    console.log(`  ${t.hash}  ${t.description}`);
+    console.log(`${tops.length} top(s) found.\n`);
+    let currentDepth = -1;
+    for (
+      const t of tops as Array<
+        { hash: string; depth: number; description: string }
+      >
+    ) {
+      if (t.depth !== currentDepth) {
+        currentDepth = t.depth;
+        console.log(`Depth ${currentDepth}:`);
+      }
+      console.log(`  ${t.hash}  ${t.description}`);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -1114,36 +1094,39 @@ async function cmdGoal(rest: string[]): Promise<void> {
   const sub = rest[0];
   if (sub === "pick") {
     const n = args.n ?? "1";
-    const url = new URL(`${BASE_URL}/goals`);
-    url.searchParams.set("pick", n);
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
-    }
-    const goals = await res.json() as Array<{
-      name: string;
-      weight: number;
-      body: string;
-    }>;
-    if (goals.length === 0) {
-      console.log("no active goals");
-      return;
-    }
-    // Client-side weighted random pick from the returned list
-    const remaining = [...goals];
-    const count = Math.min(parseInt(n, 10), remaining.length);
-    for (let i = 0; i < count; i++) {
-      const totalWeight = remaining.reduce((s, g) => s + g.weight, 0);
-      let r = Math.random() * totalWeight;
-      let idx = 0;
-      for (; idx < remaining.length - 1; idx++) {
-        r -= remaining[idx].weight;
-        if (r <= 0) break;
+    try {
+      // goal pick uses listGoals — the pick param is passed as a query,
+      // but the client doesn't support pick directly, so we list active goals
+      // and do client-side weighted random selection
+      const goals = await client.listGoals() as Array<{
+        name: string;
+        weight: number;
+        body: string | null;
+      }>;
+      if (goals.length === 0) {
+        console.log("no active goals");
+        return;
       }
-      const picked = remaining.splice(idx, 1)[0];
-      console.log(`${picked.name} (weight ${picked.weight})`);
-      if (picked.body) console.log(`  ${picked.body.split("\n")[0]}`);
+      const remaining = [...goals];
+      const count = Math.min(parseInt(n, 10), remaining.length);
+      for (let i = 0; i < count; i++) {
+        const totalWeight = remaining.reduce((s, g) => s + g.weight, 0);
+        let r = Math.random() * totalWeight;
+        let idx = 0;
+        for (; idx < remaining.length - 1; idx++) {
+          r -= remaining[idx].weight;
+          if (r <= 0) break;
+        }
+        const picked = remaining.splice(idx, 1)[0];
+        console.log(`${picked.name} (weight ${picked.weight})`);
+        if (picked.body) console.log(`  ${picked.body.split("\n")[0]}`);
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
   } else if (sub === "show") {
     const name = rest[1];
@@ -1151,51 +1134,46 @@ async function cmdGoal(rest: string[]): Promise<void> {
       console.error("usage: zts goal show <name>");
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/goals/${name}`);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
-    }
-    const goal = await res.json() as {
-      name: string;
-      weight: number;
-      done: boolean;
-      body: string;
-      comments: Array<{ body: string; createdAt: string }>;
-    };
-    console.log(
-      `${goal.name} (weight ${goal.weight}${goal.done ? ", done" : ""})`,
-    );
-    if (goal.body) console.log(goal.body);
-    if (goal.comments.length > 0) {
-      console.log("\n--- comments ---");
-      for (const c of goal.comments) {
-        console.log(`[${c.createdAt}] ${c.body}`);
+    try {
+      const goal = await client.getGoal(name);
+      console.log(
+        `${goal.name} (weight ${goal.weight}${goal.done ? ", done" : ""})`,
+      );
+      if (goal.body) console.log(goal.body);
+      if (goal.comments.length > 0) {
+        console.log("\n--- comments ---");
+        for (const c of goal.comments) {
+          console.log(`[${c.createdAt}] ${c.body}`);
+        }
       }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
   } else if (sub === "list") {
-    const url = new URL(`${BASE_URL}/goals`);
-    if (args.done) url.searchParams.set("done", "1");
-    if (args.all) url.searchParams.set("all", "1");
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
-    }
-    const goals = await res.json() as Array<{
-      name: string;
-      weight: number;
-      done: boolean;
-      body: string;
-    }>;
-    if (goals.length === 0) {
-      console.log("no goals");
-      return;
-    }
-    for (const g of goals) {
-      const status = g.done ? " [done]" : "";
-      const firstLine = g.body ? g.body.split("\n")[0] : "";
-      console.log(`${g.name}  weight=${g.weight}${status}  ${firstLine}`);
+    try {
+      const goals = await client.listGoals({
+        done: args.done,
+        all: args.all,
+      });
+      if (goals.length === 0) {
+        console.log("no goals");
+        return;
+      }
+      for (const g of goals) {
+        const status = g.done ? " [done]" : "";
+        const firstLine = g.body ? g.body.split("\n")[0] : "";
+        console.log(`${g.name}  weight=${g.weight}${status}  ${firstLine}`);
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
   } else if (sub === "done") {
     const name = rest[1];
@@ -1203,30 +1181,32 @@ async function cmdGoal(rest: string[]): Promise<void> {
       console.error("usage: zts goal done <name>");
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/goals/${name}/done`, {
-      method: "POST",
-      headers: devHeaders(),
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      await client.markGoalDone(name);
+      console.log("done");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    console.log("done");
   } else if (sub === "undone") {
     const name = rest[1];
     if (!name) {
       console.error("usage: zts goal undone <name>");
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/goals/${name}/undone`, {
-      method: "POST",
-      headers: devHeaders(),
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      await client.markGoalUndone(name);
+      console.log("undone");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    console.log("undone");
   } else if (sub === "comment") {
     const name = rest[1];
     const text = rest[2];
@@ -1234,39 +1214,39 @@ async function cmdGoal(rest: string[]): Promise<void> {
       console.error('usage: zts goal comment <name> "text"');
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/goals/${name}/comments`, {
-      method: "POST",
-      headers: devHeaders({ "content-type": "text/plain" }),
-      body: text,
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      await client.addGoalComment(name, text);
+      console.log("ok");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    console.log("ok");
   } else if (sub === "comments") {
     const name = rest[1];
     if (!name) {
       console.error("usage: zts goal comments <name> [--recent N]");
       Deno.exit(1);
     }
-    const url = new URL(`${BASE_URL}/goals/${name}/comments`);
-    if (args.recent) url.searchParams.set("recent", args.recent);
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
-    }
-    const comments = await res.json() as Array<{
-      body: string;
-      createdAt: string;
-    }>;
-    if (comments.length === 0) {
-      console.log("no comments");
-      return;
-    }
-    for (const c of comments) {
-      console.log(`[${c.createdAt}] ${c.body}`);
+    try {
+      const comments = await client.getGoalComments(name, {
+        recent: args.recent ? parseInt(args.recent, 10) : undefined,
+      });
+      if (comments.length === 0) {
+        console.log("no comments");
+        return;
+      }
+      for (const c of comments) {
+        console.log(`[${c.createdAt}] ${c.body}`);
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
   } else {
     console.error(
@@ -1291,20 +1271,19 @@ async function cmdAdmin(rest: string[]): Promise<void> {
       );
       Deno.exit(1);
     }
-    const payload: { name: string; weight?: number; body?: string } = { name };
-    if (args.weight) payload.weight = parseFloat(args.weight);
-    if (args.body) payload.body = args.body;
-    const res = await fetch(`${BASE_URL}/goals`, {
-      method: "POST",
-      headers: adminHeaders({ "content-type": "application/json" }),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      const goal = await client.createGoal(name, {
+        weight: args.weight ? parseFloat(args.weight) : undefined,
+        body: args.body,
+      });
+      console.log(`created: ${goal.name} (weight ${goal.weight})`);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    const goal = await res.json();
-    console.log(`created: ${goal.name} (weight ${goal.weight})`);
   } else if (sub === "set") {
     const name = rest[2];
     if (!name) {
@@ -1313,34 +1292,34 @@ async function cmdAdmin(rest: string[]): Promise<void> {
       );
       Deno.exit(1);
     }
-    const payload: { weight?: number; body?: string } = {};
-    if (args.weight) payload.weight = parseFloat(args.weight);
-    if (args.body) payload.body = args.body;
-    const res = await fetch(`${BASE_URL}/goals/${name}`, {
-      method: "PATCH",
-      headers: adminHeaders({ "content-type": "application/json" }),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    try {
+      await client.updateGoal(name, {
+        weight: args.weight ? parseFloat(args.weight) : undefined,
+        body: args.body,
+      });
+      console.log("ok");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
-    console.log("ok");
   } else if (sub === "delete") {
     const name = rest[2];
     if (!name) {
       console.error("usage: zts admin goal delete <name>");
       Deno.exit(1);
     }
-    const res = await fetch(`${BASE_URL}/goals/${name}`, {
-      method: "DELETE",
-      headers: adminHeaders(),
-    });
-    if (res.status === 204) {
+    try {
+      await client.deleteGoal(name);
       console.log("deleted");
-    } else {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
   } else {
     console.error("usage: zts admin goal <add|set|delete> ...");
@@ -1349,43 +1328,44 @@ async function cmdAdmin(rest: string[]): Promise<void> {
 }
 
 async function cmdStatus(): Promise<void> {
-  const url = new URL(`${BASE_URL}/status`);
-  if (args.since) url.searchParams.set("since", args.since);
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const s = await res.json() as {
-    totalAtoms: number;
-    defects: number;
-    superseded: number;
-    recentAtoms: number;
-    recentRelationships: number;
-    recentGoalsDone: number;
-    since: string;
-    goalStats: {
-      name: string;
-      total: number;
-      recent: number;
-      commentCount: number;
-    }[];
-    activeGoals: { name: string; weight: number }[];
-  };
-  console.log(
-    `Corpus: ${s.totalAtoms} atoms (${s.defects} defects, ${s.superseded} superseded)`,
-  );
-  console.log(
-    `\nRecent (since ${s.since}):  +${s.recentAtoms} atoms  +${s.recentRelationships} relationships  +${s.recentGoalsDone} goals completed`,
-  );
-  if (s.goalStats.length > 0) {
-    console.log("\nGoals (active):");
-    for (const g of s.goalStats) {
-      const recentStr = g.recent > 0 ? ` (${g.recent} new)` : "";
-      console.log(
-        `  ${g.name}  ${g.total} atoms${recentStr}  ${g.commentCount} comments`,
-      );
+  try {
+    const s = await client.getStatus(args.since) as {
+      totalAtoms: number;
+      defects: number;
+      superseded: number;
+      recentAtoms: number;
+      recentRelationships: number;
+      recentGoalsDone: number;
+      since: string;
+      goalStats: {
+        name: string;
+        total: number;
+        recent: number;
+        commentCount: number;
+      }[];
+      activeGoals: { name: string; weight: number }[];
+    };
+    console.log(
+      `Corpus: ${s.totalAtoms} atoms (${s.defects} defects, ${s.superseded} superseded)`,
+    );
+    console.log(
+      `\nRecent (since ${s.since}):  +${s.recentAtoms} atoms  +${s.recentRelationships} relationships  +${s.recentGoalsDone} goals completed`,
+    );
+    if (s.goalStats.length > 0) {
+      console.log("\nGoals (active):");
+      for (const g of s.goalStats) {
+        const recentStr = g.recent > 0 ? ` (${g.recent} new)` : "";
+        console.log(
+          `  ${g.name}  ${g.total} atoms${recentStr}  ${g.commentCount} comments`,
+        );
+      }
     }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -1527,27 +1507,21 @@ async function cmdRels(): Promise<void> {
     console.error("  at least one filter required");
     Deno.exit(1);
   }
-  const url = new URL(`${BASE_URL}/relationships`);
-  if (from) url.searchParams.set("from", from);
-  if (to) url.searchParams.set("to", to);
-  if (kind) url.searchParams.set("kind", kind);
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const rels = await res.json() as Array<{
-    from: string;
-    kind: string;
-    to: string;
-    createdAt: string;
-  }>;
-  if (rels.length === 0) {
-    console.log("no relationships found");
-    return;
-  }
-  for (const r of rels) {
-    console.log(`${r.from}  --${r.kind}-->  ${r.to}`);
+  try {
+    const rels = await client.queryRelationships({ from, to, kind });
+    if (rels.length === 0) {
+      console.log("no relationships found");
+      return;
+    }
+    for (const r of rels) {
+      console.log(`${r.from}  --${r.kind}-->  ${r.to}`);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -1557,25 +1531,24 @@ async function cmdDependents(rest: string[]): Promise<void> {
     console.error("usage: zts dependents <hash>");
     Deno.exit(1);
   }
-  const url = new URL(`${BASE_URL}/relationships`);
-  url.searchParams.set("to", hash);
-  url.searchParams.set("kind", "imports");
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const rels = await res.json() as Array<{
-    from: string;
-    kind: string;
-    to: string;
-  }>;
-  if (rels.length === 0) {
-    console.log("no dependents");
-    return;
-  }
-  for (const r of rels) {
-    console.log(r.from);
+  try {
+    const rels = await client.queryRelationships({
+      to: hash,
+      kind: "imports",
+    });
+    if (rels.length === 0) {
+      console.log("no dependents");
+      return;
+    }
+    for (const r of rels) {
+      console.log(r.from);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -1589,9 +1562,16 @@ async function cmdRelate(rest: string[]): Promise<void> {
     console.error("       zts relate <new> supersedes <old>");
     Deno.exit(1);
   }
+  // Keep raw fetch to distinguish 201 (created) vs 200 (already exists)
+  const token = Deno.env.get("ZTS_ADMIN_TOKEN") ??
+    Deno.env.get("ZTS_DEV_TOKEN");
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (token) headers["authorization"] = `Bearer ${token}`;
   const res = await fetch(`${BASE_URL}/relationships`, {
     method: "POST",
-    headers: devHeaders({ "content-type": "application/json" }),
+    headers,
     body: JSON.stringify({ from, to, kind }),
   });
   if (!res.ok) {
@@ -1609,16 +1589,16 @@ async function cmdUnrelate(rest: string[]): Promise<void> {
     console.error("usage: zts unrelate <from> <kind> <to>");
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/relationships`, {
-    method: "DELETE",
-    headers: devHeaders({ "content-type": "application/json" }),
-    body: JSON.stringify({ from, to, kind }),
-  });
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+  try {
+    await client.removeRelationship(from, kind, to);
+    console.log("removed");
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  console.log("removed");
 }
 
 async function spawnRun(
@@ -1684,20 +1664,32 @@ async function cmdBundle(rest: string[]): Promise<void> {
     console.error("usage: zts bundle <hash> [-o <dir>]");
     Deno.exit(1);
   }
-  const res = await fetch(`${BASE_URL}/bundle/${hash}`);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
   const outDir = args.o;
   if (outDir) {
-    const zip = parseZip(await readAll(res.body!));
-    for (const [path, data] of zip) {
-      const fullPath = `${outDir}/${path}`;
-      await Deno.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
-      await Deno.writeFile(fullPath, data);
+    try {
+      const zipData = await client.getBundle(hash);
+      const zip = parseZip(zipData);
+      for (const [path, data] of zip) {
+        const fullPath = `${outDir}/${path}`;
+        await Deno.mkdir(fullPath.replace(/\/[^/]+$/, ""), {
+          recursive: true,
+        });
+        await Deno.writeFile(fullPath, data);
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
     }
   } else {
+    // Raw fetch for stdout pipe — need streaming body
+    const res = await fetch(`${BASE_URL}/bundle/${hash}`);
+    if (!res.ok) {
+      console.error(`error: ${res.status} ${await res.text()}`);
+      Deno.exit(1);
+    }
     await res.body!.pipeTo(Deno.stdout.writable);
   }
 }
@@ -1710,29 +1702,20 @@ async function cmdDescribe(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
   const description = args.d;
-  if (description) {
-    // Write description
-    const res = await fetch(
-      `${BASE_URL}/a/${hash}/description`,
-      {
-        method: "POST",
-        headers: devHeaders({ "content-type": "text/plain" }),
-        body: description,
-      },
-    );
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
+  try {
+    if (description) {
+      await client.describeUpdate(hash, description);
+      console.log("ok");
+    } else {
+      const text = await client.describeRead(hash);
+      console.log(text);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
       Deno.exit(1);
     }
-    console.log("ok");
-  } else {
-    // Read description
-    const res = await fetch(`${BASE_URL}/a/${hash}/description`);
-    if (!res.ok) {
-      console.error(`error: ${res.status} ${await res.text()}`);
-      Deno.exit(1);
-    }
-    console.log(await res.text());
+    throw e;
   }
 }
 
@@ -1742,26 +1725,25 @@ async function cmdSimilar(rest: string[]): Promise<void> {
     console.error("usage: zts similar <hash> [-k <n>]");
     Deno.exit(1);
   }
-  const k = args.k ?? "10";
-  const url = new URL(`${BASE_URL}/similar/${hash}`);
-  url.searchParams.set("k", k);
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  const hits = await res.json() as Array<{
-    hash: string;
-    score: number;
-    description: string;
-  }>;
-  if (hits.length === 0) {
-    console.log("no similar atoms");
-    return;
-  }
-  for (const hit of hits) {
-    const score = hit.score.toFixed(3);
-    console.log(`${hit.hash}  ${score}  ${hit.description}`);
+  try {
+    const hits = await client.similar(
+      hash,
+      args.k ? parseInt(args.k, 10) : 10,
+    );
+    if (hits.length === 0) {
+      console.log("no similar atoms");
+      return;
+    }
+    for (const hit of hits) {
+      const score = hit.score.toFixed(3);
+      console.log(`${hit.hash}  ${score}  ${hit.description}`);
+    }
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
 }
 
@@ -1777,47 +1759,35 @@ async function cmdSearch(rest: string[]): Promise<void> {
     console.error("       zts search --code <query> [-k <n>]");
     Deno.exit(1);
   }
-  const k = args.k ?? (isCode ? "20" : "10");
-  const url = new URL(`${BASE_URL}/search`);
-  if (isCode) {
-    url.searchParams.set("code", query);
-  } else {
-    url.searchParams.set("q", query);
-  }
-  url.searchParams.set("k", k);
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
-  }
-  if (isCode) {
-    const hits = await res.json() as Array<{
-      hash: string;
-      snippet: string;
-      description: string;
-    }>;
-    if (hits.length === 0) {
-      console.log("no results");
-      return;
+  const k = parseInt(args.k ?? (isCode ? "20" : "10"), 10);
+  try {
+    if (isCode) {
+      const hits = await client.searchCode(query, k);
+      if (hits.length === 0) {
+        console.log("no results");
+        return;
+      }
+      for (const hit of hits) {
+        console.log(`${hit.hash}  ${hit.description}`);
+        console.log(`  ${hit.snippet}`);
+      }
+    } else {
+      const hits = await client.search(query, k);
+      if (hits.length === 0) {
+        console.log("no results");
+        return;
+      }
+      for (const hit of hits) {
+        const score = hit.score.toFixed(3);
+        console.log(`${hit.hash}  ${score}  ${hit.description}`);
+      }
     }
-    for (const hit of hits) {
-      console.log(`${hit.hash}  ${hit.description}`);
-      console.log(`  ${hit.snippet}`);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
     }
-  } else {
-    const hits = await res.json() as Array<{
-      hash: string;
-      score: number;
-      description: string;
-    }>;
-    if (hits.length === 0) {
-      console.log("no results");
-      return;
-    }
-    for (const hit of hits) {
-      const score = hit.score.toFixed(3);
-      console.log(`${hit.hash}  ${score}  ${hit.description}`);
-    }
+    throw e;
   }
 }
 
@@ -1827,17 +1797,16 @@ async function cmdTest(rest: string[]): Promise<void> {
     console.error("usage: zts test <hash>");
     Deno.exit(1);
   }
-  const url = new URL(`${BASE_URL}/relationships`);
-  url.searchParams.set("to", hash);
-  url.searchParams.set("kind", "tests");
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`error: ${res.status} ${await res.text()}`);
-    Deno.exit(1);
+  let rels;
+  try {
+    rels = await client.queryRelationships({ to: hash, kind: "tests" });
+  } catch (e) {
+    if (e instanceof ApiError) {
+      console.error(`error: ${e.status} ${e.message}`);
+      Deno.exit(1);
+    }
+    throw e;
   }
-  const rels = await res.json() as Array<
-    { from: string; kind: string; to: string }
-  >;
   if (rels.length === 0) {
     console.log("no tests registered for " + hash);
     return;

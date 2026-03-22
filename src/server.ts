@@ -25,8 +25,8 @@ const brotliCompressP = promisify(brotliCompress);
 export const DATA_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
 export const PORT = 8000;
 
-const embedConfig = defaultEmbedConfig();
-const EMBED_DIM = parseInt(Deno.env.get("ZTS_EMBED_DIM") ?? "768");
+let embedConfig = defaultEmbedConfig();
+let embedDim = parseInt(Deno.env.get("ZTS_embedDim") ?? "768");
 
 const KNOWN_RELATIONSHIP_KINDS = new Set(["tests", "imports", "supersedes"]);
 const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
@@ -63,6 +63,7 @@ async function serveStatic(filePath: string): Promise<Response | null> {
 let db: Db;
 let hnswIndex: HnswIndex;
 let authConfig: AuthConfig;
+let serverPort: number = PORT;
 
 async function gzipSize(text: string): Promise<number> {
   const stream = new CompressionStream("gzip");
@@ -81,12 +82,12 @@ async function runTests(
   testHashes: string[],
   targetHash: string,
 ): Promise<Response | null> {
-  const serverUrl = `http://localhost:${PORT}`;
+  const serverUrl = `http://localhost:${serverPort}`;
   const start = performance.now();
   const proc = new Deno.Command(Deno.execPath(), {
     args: [
       "test",
-      `--allow-import=localhost:${PORT}`,
+      `--allow-import=localhost:${serverPort}`,
       "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
       "--no-lock",
       TEST_RUNNER,
@@ -1380,18 +1381,41 @@ async function route(req: Request): Promise<Response> {
   return new Response("Not found", { status: 404 });
 }
 
-export async function serve(): Promise<void> {
-  await Deno.mkdir(DATA_DIR, { recursive: true });
+export interface ServerConfig {
+  port: number;
+  hostname?: string;
+  dbPath: string;
+  devToken?: string;
+  adminToken?: string;
+  skipEmbedCheck?: boolean;
+  embedUrl?: string;
+  embedModel?: string;
+  embedDim?: number;
+}
 
+export interface ServerHandle {
+  port: number;
+  shutdown(): Promise<void>;
+}
+
+export function startServer(config: ServerConfig): ServerHandle {
   authConfig = {
-    devToken: Deno.env.get("ZTS_DEV_TOKEN") || undefined,
-    adminToken: Deno.env.get("ZTS_ADMIN_TOKEN") || undefined,
+    devToken: config.devToken,
+    adminToken: config.adminToken,
   };
 
-  db = new Db(`${DATA_DIR}/zts.db`);
+  if (config.embedUrl || config.embedModel) {
+    embedConfig = {
+      url: config.embedUrl ?? embedConfig.url,
+      model: config.embedModel ?? embedConfig.model,
+    };
+  }
+  if (config.embedDim) embedDim = config.embedDim;
+
+  db = new Db(config.dbPath);
   const allVecs = db.getAllEmbeddings();
   hnswIndex = HnswIndex.create(
-    EMBED_DIM,
+    embedDim,
     Math.max(allVecs.size * 2, 1024),
   );
   for (const [hash, vec] of allVecs) hnswIndex.add(hash, vec);
@@ -1399,23 +1423,49 @@ export async function serve(): Promise<void> {
     console.log(`Loaded ${hnswIndex.size} embeddings into HNSW index`);
   }
 
-  // Warn if embedding service is unreachable (non-blocking)
-  checkEmbeddingService(embedConfig).then((ok) => {
-    if (!ok) {
-      console.warn(
-        `warning: embedding service not reachable at ${embedConfig.url}`,
-      );
-      console.warn(
-        "  POST /a/<hash>/description and GET /search will return 503",
-      );
-      console.warn(
-        "  Existing embeddings are still indexed and searchable if present",
-      );
-    }
+  if (!config.skipEmbedCheck) {
+    checkEmbeddingService(embedConfig).then((ok) => {
+      if (!ok) {
+        console.warn(
+          `warning: embedding service not reachable at ${embedConfig.url}`,
+        );
+        console.warn(
+          "  POST /a/<hash>/description and GET /search will return 503",
+        );
+        console.warn(
+          "  Existing embeddings are still indexed and searchable if present",
+        );
+      }
+    });
+  }
+
+  const server = Deno.serve({
+    port: config.port,
+    hostname: config.hostname ?? "0.0.0.0",
+  }, handler);
+  const actualPort = (server.addr as Deno.NetAddr).port;
+  serverPort = actualPort;
+
+  return {
+    port: actualPort,
+    async shutdown() {
+      await server.shutdown();
+      db.close();
+    },
+  };
+}
+
+export async function serve(): Promise<void> {
+  await Deno.mkdir(DATA_DIR, { recursive: true });
+
+  const handle = startServer({
+    port: PORT,
+    dbPath: `${DATA_DIR}/zts.db`,
+    devToken: Deno.env.get("ZTS_DEV_TOKEN") || undefined,
+    adminToken: Deno.env.get("ZTS_ADMIN_TOKEN") || undefined,
   });
 
-  Deno.serve({ port: PORT }, handler);
-  console.log(`Listening on http://localhost:${PORT}`);
+  console.log(`Listening on http://localhost:${handle.port}`);
   console.log(
     "  POST /a                          — store atom (requires X-Description header)",
   );

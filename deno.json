@@ -22,7 +22,9 @@
   "tasks": {
     "zts": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-import --allow-ffi main.ts",
     "install": "deno install --global --allow-read --allow-write --allow-net --allow-env --allow-run=systemctl,tail,logrotate,deno,claude,kill --allow-import --allow-ffi --config deno.json -f -n zts main.ts",
-    "test": "deno test --allow-env --allow-net --allow-ffi --allow-read --allow-write src/",
-    "precommit": "deno fmt && deno check main.ts && deno test --allow-env --allow-net --allow-ffi --allow-read --allow-write src/ && deno lint"
+    "test": "deno test --allow-env --allow-ffi --allow-read --allow-net=localhost,0.0.0.0 src/ --ignore=src/integration.test.ts",
+    "test:integration": "deno test --allow-env --allow-ffi --allow-read --allow-net=localhost,127.0.0.1,0.0.0.0 --allow-write=/tmp/zts-test --allow-run=deno src/integration.test.ts",
+    "test:all": "deno task test && deno task test:integration",
+    "precommit": "deno fmt && deno check main.ts && deno task test:all && deno lint"
   }
 }
