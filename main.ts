@@ -2,7 +2,16 @@ import { parseArgs } from "@std/cli/parse-args";
 import { parseZip } from "./src/bundle.ts";
 import { minify } from "./src/minify.ts";
 import { MAX_GZIP_BYTES } from "./src/validate.ts";
-import { DATA_DIR, PORT, serve } from "./src/server.ts";
+import { serve } from "./src/server.ts";
+import { serveChecker } from "./src/checker.ts";
+import {
+  configPath,
+  DEFAULT_CHECKER_PORT,
+  DEFAULT_DATA_DIR,
+  initConfig,
+  loadConfig,
+  type ZtsConfig,
+} from "./src/config.ts";
 import {
   runWorker,
   setupWorkspace,
@@ -11,50 +20,10 @@ import {
 } from "./src/worker.ts";
 import { ApiError, createBearerClient } from "./src/api-client.ts";
 
-const BASE_URL = Deno.env.get("ZTS_URL") ?? `http://localhost:${PORT}`;
-const client = createBearerClient(BASE_URL, {
-  dev: Deno.env.get("ZTS_DEV_TOKEN"),
-  admin: Deno.env.get("ZTS_ADMIN_TOKEN"),
-}, Deno);
-
-function checkServerEnv(): void {
-  const missing: string[] = [];
-  if (!Deno.env.get("ZTS_DEV_TOKEN")) missing.push("ZTS_DEV_TOKEN");
-  if (!Deno.env.get("ZTS_ADMIN_TOKEN")) missing.push("ZTS_ADMIN_TOKEN");
-  if (missing.length > 0) {
-    console.error(
-      `error: required environment variables not set: ${missing.join(", ")}`,
-    );
-    console.error(
-      "Set them in your environment or in " + ENV_FILE,
-    );
-    Deno.exit(1);
-  }
-}
-
-async function writeEnvFile(): Promise<void> {
-  const lines: string[] = [];
-  const devToken = Deno.env.get("ZTS_DEV_TOKEN");
-  const adminToken = Deno.env.get("ZTS_ADMIN_TOKEN");
-  if (devToken) lines.push(`ZTS_DEV_TOKEN=${devToken}`);
-  if (adminToken) lines.push(`ZTS_ADMIN_TOKEN=${adminToken}`);
-  if (lines.length > 0) {
-    await Deno.mkdir(DATA_DIR, { recursive: true });
-    await Deno.writeTextFile(ENV_FILE, lines.join("\n") + "\n");
-  }
-}
-
-const UNIT_NAME = "zettelkasten";
-const LOGROTATE_UNIT = "zts-logrotate";
-const UNIT_DIR = `${Deno.env.get("HOME")}/.config/systemd/user`;
-const UNIT_FILE = `${UNIT_DIR}/${UNIT_NAME}.service`;
-const LOG_FILE = `${DATA_DIR}/server.log`;
-const ENV_FILE = `${DATA_DIR}/env`;
-const LOGROTATE_CONF = `${DATA_DIR}/logrotate.conf`;
-const LOGROTATE_STATE = `${DATA_DIR}/logrotate.status`;
-
 const args = parseArgs(Deno.args, {
   string: [
+    "config",
+    "port",
     "d",
     "m",
     "n",
@@ -109,27 +78,63 @@ const args = parseArgs(Deno.args, {
   },
 });
 
+// ---- Config & client setup ----
+
+const dataDir = DEFAULT_DATA_DIR;
+const cfgPath = args.config ?? configPath(dataDir);
+
+// Commands that don't need config
+const NO_CONFIG_COMMANDS = new Set(["init", "checker", "size"]);
 const [command, ...rest] = args._ as string[];
+const needsConfig = command && !NO_CONFIG_COMMANDS.has(command) && !args.h &&
+  !args.help;
+
+let cfg!: ZtsConfig;
+let client!: ReturnType<typeof createBearerClient>;
+
+if (needsConfig) {
+  cfg = await loadConfig(cfgPath, dataDir);
+  const baseUrl = `http://localhost:${cfg.serverPort}`;
+  client = createBearerClient(baseUrl, {
+    dev: cfg.devToken,
+    admin: cfg.adminToken,
+  }, Deno);
+}
+
+// ---- Derived constants ----
+
+const SERVER_UNIT = "zts-server";
+const CHECKER_UNIT = "zts-checker";
+const LOGROTATE_UNIT = "zts-logrotate";
+const UNIT_DIR = `${Deno.env.get("HOME")}/.config/systemd/user`;
+const SERVER_LOG = `${dataDir}/server.log`;
+const CHECKER_LOG = `${dataDir}/checker.log`;
+const LOGROTATE_CONF = `${dataDir}/logrotate.conf`;
+const LOGROTATE_STATE = `${dataDir}/logrotate.status`;
 
 const SUBCOMMAND_HELP: Record<string, string> = {
-  run: `zts run
-  Start the server in foreground. Requires ZTS_DEV_TOKEN and ZTS_ADMIN_TOKEN.`,
+  init: `zts init
+  Create config.json5 in ${DEFAULT_DATA_DIR}/ with random auth tokens.
+  Edit the file to customize settings before starting services.`,
 
-  start: `zts start
-  Install systemd user service and start the daemon.
-  Tokens are saved to ${DATA_DIR}/env and loaded by the service.
-  Requires ZTS_DEV_TOKEN and ZTS_ADMIN_TOKEN in environment.`,
+  server: `zts server <run|start|stop|restart|log>
+  run       start server in foreground
+  start     install systemd user service and start
+  stop      stop and disable
+  restart   restart the daemon
+  log       show process log (-f to follow, -n <lines>)
 
-  stop: `zts stop
-  Stop and disable the systemd daemon.`,
+  Reads config from ${DEFAULT_DATA_DIR}/config.json5.
+  Override with --config <path>.`,
 
-  restart: `zts restart
-  Restart the systemd daemon.`,
+  checker: `zts checker <run|start|stop|restart|log>
+  run       start checker in foreground (default port ${DEFAULT_CHECKER_PORT})
+  start     install systemd user service and start
+  stop      stop and disable
+  restart   restart the daemon
+  log       show process log (-f to follow, -n <lines>)
 
-  "server-log": `zts server-log [-f] [-n <lines>]
-  Show the server process log (tail).
-  -f          follow (live output)
-  -n <lines>  number of lines (default: 50)`,
+  Override port with --port <N>.`,
 
   log: `zts log [--recent N] [--op X] [--subject X]
   Query the structured audit log.
@@ -315,30 +320,192 @@ if (
   }
 }
 
+// ---- Service definitions ----
+
+interface ServiceDef {
+  unitName: string;
+  description: string;
+  command: string;
+  logFile: string;
+  perms: string;
+}
+
+const SERVER_DEF: ServiceDef = {
+  unitName: SERVER_UNIT,
+  description: "Zettelkasten atom server",
+  command: "server run",
+  logFile: SERVER_LOG,
+  perms:
+    "--allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-import",
+};
+
+const CHECKER_DEF: ServiceDef = {
+  unitName: CHECKER_UNIT,
+  description: "Zettelkasten test checker",
+  command: "checker run",
+  logFile: CHECKER_LOG,
+  perms: "--allow-net --allow-run=deno --allow-read",
+};
+
+async function installService(def: ServiceDef): Promise<void> {
+  const denoExec = Deno.execPath();
+  const scriptPath = new URL(import.meta.url).pathname;
+  const projectDir = new URL(".", import.meta.url).pathname;
+
+  const unit = [
+    "[Unit]",
+    `Description=${def.description}`,
+    "",
+    "[Service]",
+    `WorkingDirectory=${projectDir}`,
+    `ExecStart=${denoExec} run ${def.perms} ${scriptPath} ${def.command}`,
+    `StandardOutput=append:${def.logFile}`,
+    `StandardError=append:${def.logFile}`,
+    "Restart=on-failure",
+    "",
+    "[Install]",
+    "WantedBy=default.target",
+  ].join("\n") + "\n";
+
+  await Deno.mkdir(UNIT_DIR, { recursive: true });
+  await Deno.mkdir(dataDir, { recursive: true });
+  await Deno.writeTextFile(`${UNIT_DIR}/${def.unitName}.service`, unit);
+
+  const logrotateConf = [
+    `${SERVER_LOG} ${CHECKER_LOG} {`,
+    "    rotate 14",
+    "    daily",
+    "    compress",
+    "    missingok",
+    "    notifempty",
+    "    copytruncate",
+    "    maxsize 50M",
+    "}",
+  ].join("\n") + "\n";
+  const logrotateService = [
+    "[Unit]",
+    "Description=Rotate zettelkasten logs",
+    "",
+    "[Service]",
+    "Type=oneshot",
+    `ExecStart=logrotate --state ${LOGROTATE_STATE} ${LOGROTATE_CONF}`,
+  ].join("\n") + "\n";
+  const logrotateTimer = [
+    "[Unit]",
+    "Description=Daily zettelkasten log rotation",
+    "",
+    "[Timer]",
+    "OnCalendar=daily",
+    "Persistent=true",
+    "",
+    "[Install]",
+    "WantedBy=timers.target",
+  ].join("\n") + "\n";
+
+  await Deno.writeTextFile(LOGROTATE_CONF, logrotateConf);
+  await Deno.writeTextFile(
+    `${UNIT_DIR}/${LOGROTATE_UNIT}.service`,
+    logrotateService,
+  );
+  await Deno.writeTextFile(
+    `${UNIT_DIR}/${LOGROTATE_UNIT}.timer`,
+    logrotateTimer,
+  );
+  await systemctl("daemon-reload");
+}
+
+async function startService(def: ServiceDef): Promise<void> {
+  const check = new Deno.Command("systemctl", {
+    args: ["--user", "is-active", "--quiet", def.unitName],
+  });
+  const { code } = await check.output();
+  if (code === 0) {
+    console.error(
+      `error: ${def.unitName} is already running (use 'zts ${
+        def.unitName.replace("zts-", "")
+      } restart')`,
+    );
+    Deno.exit(1);
+  }
+  await installService(def);
+  await systemctl("enable", "--now", def.unitName);
+  await systemctl("enable", "--now", `${LOGROTATE_UNIT}.timer`);
+  console.log(`${def.unitName} enabled and started.`);
+  console.log(`Logs: ${def.logFile}`);
+}
+
+async function stopService(def: ServiceDef): Promise<void> {
+  await systemctl("disable", "--now", def.unitName);
+  console.log(`${def.unitName} stopped and disabled.`);
+}
+
+async function showLog(logFile: string): Promise<void> {
+  const lines = args.n ?? "50";
+  const follow = args.f;
+  const tailArgs = follow
+    ? ["-f", "-n", lines, logFile]
+    : ["-n", lines, logFile];
+  const proc = new Deno.Command("tail", {
+    args: tailArgs,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const { code } = await proc.output();
+  if (code !== 0) Deno.exit(code);
+}
+
+// ---- Command dispatch ----
+
 switch (command) {
-  case "run":
-    checkServerEnv();
-    await serve();
+  case "server": {
+    const sub = rest[0];
+    if (sub === "run") {
+      await serve({
+        port: cfg.serverPort,
+        dataDir: cfg.dataDir,
+        devToken: cfg.devToken,
+        adminToken: cfg.adminToken,
+        checkerUrl: cfg.checkerUrl,
+        embedUrl: cfg.embedUrl,
+        embedModel: cfg.embedModel,
+        embedDim: cfg.embedDim,
+      });
+    } else if (sub === "start") {
+      await startService(SERVER_DEF);
+    } else if (sub === "stop") {
+      await stopService(SERVER_DEF);
+    } else if (sub === "restart") {
+      await installService(SERVER_DEF);
+      await systemctl("restart", SERVER_UNIT);
+    } else if (sub === "log") {
+      await showLog(SERVER_LOG);
+    } else {
+      console.error("usage: zts server <run|start|stop|restart|log>");
+      Deno.exit(1);
+    }
     break;
+  }
 
-  case "start":
-    checkServerEnv();
-    await writeEnvFile();
-    await daemonStart();
+  case "checker": {
+    const sub = rest[0];
+    if (sub === "run") {
+      const port = args.port ? parseInt(args.port, 10) : DEFAULT_CHECKER_PORT;
+      serveChecker(port);
+    } else if (sub === "start") {
+      await startService(CHECKER_DEF);
+    } else if (sub === "stop") {
+      await stopService(CHECKER_DEF);
+    } else if (sub === "restart") {
+      await installService(CHECKER_DEF);
+      await systemctl("restart", CHECKER_UNIT);
+    } else if (sub === "log") {
+      await showLog(CHECKER_LOG);
+    } else {
+      console.error("usage: zts checker <run|start|stop|restart|log>");
+      Deno.exit(1);
+    }
     break;
-
-  case "stop":
-    await daemonStop();
-    break;
-
-  case "restart":
-    await daemonInstall();
-    await systemctl("restart", UNIT_NAME);
-    break;
-
-  case "server-log":
-    await cmdServerLog();
-    break;
+  }
 
   case "log":
     await cmdAuditLog();
@@ -475,6 +642,15 @@ switch (command) {
     break;
   }
 
+  case "init": {
+    const path = await initConfig(dataDir);
+    console.log(`Created ${path}`);
+    console.log("Edit it to configure tokens and settings, then:");
+    console.log("  zts checker run   # start checker");
+    console.log("  zts server run    # start server");
+    break;
+  }
+
   default:
     console.error(`usage: zts <command> [options]
 
@@ -554,12 +730,22 @@ Scripting:
   script -f <file.ts>          run script from file
   script --types               print ZtsClient type definitions
 
+Setup:
+  init                         create config.json5 with random tokens
+
 Server:
-  run                          start server in foreground
-  start                        install + start daemon
-  stop                         stop + disable daemon
-  restart                      restart daemon
-  server-log [-f] [-n <lines>] show server process log
+  server run                   start server in foreground
+  server start                 install + start daemon
+  server stop                  stop + disable daemon
+  server restart               restart daemon
+  server log [-f] [-n <lines>] show server process log
+
+Checker:
+  checker run                  start checker in foreground
+  checker start                install + start daemon
+  checker stop                 stop + disable daemon
+  checker restart              restart daemon
+  checker log [-f] [-n <lines>] show checker process log
 
 Hash prefixes work everywhere (e.g. zts info 3ax9).
 Use <command> -h for detailed help on a specific command.`);
@@ -574,114 +760,6 @@ async function systemctl(...cmd: string[]): Promise<void> {
   });
   const { code } = await proc.output();
   if (code !== 0) throw new Error(`systemctl exited with code ${code}`);
-}
-
-async function daemonInstall(): Promise<void> {
-  const denoExec = Deno.execPath();
-  const scriptPath = new URL(import.meta.url).pathname;
-  const projectDir = new URL(".", import.meta.url).pathname;
-
-  const unit = [
-    "[Unit]",
-    "Description=Zettelkasten atom server",
-    "",
-    "[Service]",
-    `WorkingDirectory=${projectDir}`,
-    `EnvironmentFile=${ENV_FILE}`,
-    `ExecStart=${denoExec} run --allow-net --allow-read --allow-write --allow-env --allow-run=${denoExec} --allow-ffi ${scriptPath} run`,
-    `StandardOutput=append:${LOG_FILE}`,
-    `StandardError=append:${LOG_FILE}`,
-    "Restart=on-failure",
-    "",
-    "[Install]",
-    "WantedBy=default.target",
-  ].join("\n") + "\n";
-
-  const logrotateConf = [
-    `${LOG_FILE} {`,
-    "    rotate 14",
-    "    daily",
-    "    compress",
-    "    missingok",
-    "    notifempty",
-    "    copytruncate",
-    "    maxsize 50M",
-    "}",
-  ].join("\n") + "\n";
-
-  const logrotateService = [
-    "[Unit]",
-    "Description=Rotate zettelkasten server logs",
-    "",
-    "[Service]",
-    "Type=oneshot",
-    `ExecStart=logrotate --state ${LOGROTATE_STATE} ${LOGROTATE_CONF}`,
-  ].join("\n") + "\n";
-
-  const logrotateTimer = [
-    "[Unit]",
-    "Description=Daily zettelkasten log rotation",
-    "",
-    "[Timer]",
-    "OnCalendar=daily",
-    "Persistent=true",
-    "",
-    "[Install]",
-    "WantedBy=timers.target",
-  ].join("\n") + "\n";
-
-  await Deno.mkdir(UNIT_DIR, { recursive: true });
-  await Deno.mkdir(DATA_DIR, { recursive: true });
-  await Deno.writeTextFile(UNIT_FILE, unit);
-  await Deno.writeTextFile(LOGROTATE_CONF, logrotateConf);
-  await Deno.writeTextFile(
-    `${UNIT_DIR}/${LOGROTATE_UNIT}.service`,
-    logrotateService,
-  );
-  await Deno.writeTextFile(
-    `${UNIT_DIR}/${LOGROTATE_UNIT}.timer`,
-    logrotateTimer,
-  );
-  await systemctl("daemon-reload");
-}
-
-async function daemonStart(): Promise<void> {
-  const check = new Deno.Command("systemctl", {
-    args: ["--user", "is-active", "--quiet", UNIT_NAME],
-  });
-  const { code } = await check.output();
-  if (code === 0) {
-    console.error("error: service is already running (use 'zts restart')");
-    Deno.exit(1);
-  }
-  await daemonInstall();
-  await systemctl("enable", "--now", UNIT_NAME);
-  await systemctl("enable", "--now", `${LOGROTATE_UNIT}.timer`);
-  console.log("Service enabled and started.");
-  console.log(`Logs: ${LOG_FILE}`);
-}
-
-async function daemonStop(): Promise<void> {
-  await systemctl("disable", "--now", UNIT_NAME);
-  try {
-    await systemctl("disable", "--now", `${LOGROTATE_UNIT}.timer`);
-  } catch { /* timer may not exist */ }
-  console.log("Service stopped and disabled.");
-}
-
-async function cmdServerLog(): Promise<void> {
-  const lines = args.n ?? "50";
-  const follow = args.f;
-  const tailArgs = follow
-    ? ["-f", "-n", lines, LOG_FILE]
-    : ["-n", lines, LOG_FILE];
-  const proc = new Deno.Command("tail", {
-    args: tailArgs,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await proc.output();
-  if (code !== 0) Deno.exit(code);
 }
 
 async function cmdAuditLog(): Promise<void> {
@@ -1388,13 +1466,6 @@ async function cmdStatus(): Promise<void> {
 }
 
 function workerConfig(): WorkerConfig {
-  const devToken = Deno.env.get("ZTS_DEV_TOKEN");
-  if (!devToken) {
-    console.error(
-      "error: ZTS_DEV_TOKEN is not set. Export it to run the worker.",
-    );
-    Deno.exit(1);
-  }
   return {
     channel: args.channel ?? "default",
     workspacesDir: args["workspaces-dir"] ?? "./workspaces",
@@ -1403,8 +1474,8 @@ function workerConfig(): WorkerConfig {
     once: args.once ?? false,
     dangerouslySkipPermissions: args["dangerously-skip-permissions"] ?? false,
     model: args.model,
-    serverUrl: BASE_URL,
-    devToken,
+    serverUrl: `http://localhost:${cfg.serverPort}`,
+    devToken: cfg.devToken,
     contextPromptFile: args["context-prompt"],
     iterationPromptFile: args["iteration-prompt"],
     retrospectivePromptFile: args["retrospective-prompt"],

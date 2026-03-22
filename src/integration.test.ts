@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { type CheckerHandle, startChecker } from "./checker.ts";
 import { checkEmbeddingService, defaultEmbedConfig } from "./embed.ts";
 import { type ServerHandle, startServer } from "./server.ts";
 import { ApiError, createBearerClient } from "./api-client.ts";
@@ -43,12 +44,19 @@ Deno.test("integration: full workflow", async (t) => {
 
   log("embeddings:", embedAvailable ? "available" : "skipped");
 
+  const checkerHandle: CheckerHandle = startChecker({
+    port: 0,
+    hostname: "127.0.0.1",
+  });
+  log(`checker started on port ${checkerHandle.port}`);
+
   const handle: ServerHandle = startServer({
     port: 0,
     hostname: "127.0.0.1",
     dbPath: ":memory:",
     devToken: DEV_TOKEN,
     adminToken: ADMIN_TOKEN,
+    checkerUrl: `http://127.0.0.1:${checkerHandle.port}`,
     skipEmbedCheck: true,
   });
 
@@ -782,5 +790,6 @@ Deno.test("integration: full workflow", async (t) => {
   } finally {
     await Deno.remove(TMP_DIR, { recursive: true }).catch(() => {});
     await handle.shutdown();
+    await checkerHandle.shutdown();
   }
 });

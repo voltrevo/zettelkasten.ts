@@ -13,30 +13,30 @@ atoms over writing new ones.
 ## Running
 
 ```sh
-# First-time setup: build the UI
+# First-time setup
 cd ui && npm install && npm run build && cd ..
+zts init                         # creates config.json5 with random tokens
 
-deno task zts run          # start server in foreground (port 8000)
-deno task test             # run unit tests
-deno task test:integration # run integration tests (real server, in-memory DB)
+# Start both services (two terminals):
+zts checker run                  # test execution (port 7484)
+zts server run                   # main server (port 7483)
+
+# Or as systemd daemons:
+zts checker start
+zts server start
+zts server stop / zts checker stop
+
+# Development:
+deno task test             # unit tests
+deno task test:integration # integration tests (in-memory server + checker)
 deno task test:all         # both
-deno task ui:build         # build the web UI (Vite + TypeScript)
-deno task ui:dev           # Vite dev server with HMR (proxies API to port 8000)
+deno task ui:dev           # Vite dev server with HMR
 deno task precommit        # fmt + typecheck + test + lint + ui build
 ```
 
-Daemon commands (systemd user unit):
-
-```sh
-deno task zts start        # install + enable + start
-deno task zts stop         # disable + stop
-deno task zts restart
-deno task zts server-log [-f]
-```
-
-Requires `ZTS_DEV_TOKEN` and `ZTS_ADMIN_TOKEN` in environment. The server
-refuses to start without them. Tokens are saved to
-`~/.local/share/zettelkasten/env` for the systemd unit.
+Configuration lives in `~/.local/share/zettelkasten/config.json5` (created by
+`zts init`). The file is `chmod 600` — the server refuses to start if it's
+world-readable. Override path with `--config <path>`.
 
 ## Atom rules (enforced at submission)
 
@@ -96,8 +96,7 @@ Bearer tokens, three tiers:
   done/comment, etc.)
 - **admin** — goal CRUD, starred property, prompt overrides
 
-The CLI auto-includes the right token from `ZTS_DEV_TOKEN` / `ZTS_ADMIN_TOKEN`
-environment variables.
+The CLI reads tokens from `config.json5` automatically.
 
 ## CLI reference
 
@@ -204,7 +203,9 @@ zts describe <hash> -d "BROKEN: <what is wrong>. <original description>"
 
 | File                 | Purpose                                                            |
 | -------------------- | ------------------------------------------------------------------ |
+| `src/config.ts`      | Config loading from config.json5, permission check, defaults       |
 | `src/server.ts`      | HTTP server: routes, atom storage, search, auth enforcement        |
+| `src/checker.ts`     | Test checker service: sandboxed test execution via subprocess      |
 | `src/db.ts`          | Unified SQLite wrapper: all tables, schema migrations              |
 | `src/api-client.ts`  | Typed API client: shared by CLI and web UI                         |
 | `src/cap.ts`         | DenoCap interface: platform abstraction for subprocess/FS ops      |

@@ -22,16 +22,12 @@ import { isTestAtom, validateAtom } from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
 
-export const DATA_DIR = `${Deno.env.get("HOME")}/.local/share/zettelkasten`;
-export const PORT = 8000;
+import { DEFAULT_SERVER_PORT } from "./config.ts";
 
 let embedConfig = defaultEmbedConfig();
-let embedDim = parseInt(Deno.env.get("ZTS_embedDim") ?? "768");
+let embedDim = 768;
 
 const KNOWN_RELATIONSHIP_KINDS = new Set(["tests", "imports", "supersedes"]);
-const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
-
-const PROCESS_TIMEOUT_MS = 5000; // process lifecycle (startup + import + run)
 
 const ADMIN_ONLY_PROPERTIES = new Set(["starred"]);
 
@@ -63,7 +59,8 @@ async function serveStatic(filePath: string): Promise<Response | null> {
 let db: Db;
 let hnswIndex: HnswIndex;
 let authConfig: AuthConfig;
-let serverPort: number = PORT;
+let serverPort: number = DEFAULT_SERVER_PORT;
+let checkerUrl: string;
 
 async function gzipSize(text: string): Promise<number> {
   const stream = new CompressionStream("gzip");
@@ -77,68 +74,38 @@ async function gzipSize(text: string): Promise<number> {
   return chunks.reduce((n, c) => n + c.length, 0);
 }
 
-/** Run test atoms against a target. Records results in test_runs. Returns null on success, or an error Response. */
+/** Run test atoms against a target via the checker service. Records results in test_runs. */
 async function runTests(
   testHashes: string[],
   targetHash: string,
 ): Promise<Response | null> {
   const serverUrl = `http://localhost:${serverPort}`;
-  const start = performance.now();
-  const proc = new Deno.Command(Deno.execPath(), {
-    args: [
-      "test",
-      `--allow-import=localhost:${serverPort}`,
-      "--no-lock",
-      TEST_RUNNER,
-      "--",
-      serverUrl,
-      targetHash,
-      testHashes.join(","),
-    ],
-    stdout: "piped",
-    stderr: "piped",
+  const res = await fetch(`${checkerUrl}/check`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serverUrl, targetHash, testHashes }),
   });
-  let output: Deno.CommandOutput;
-  try {
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Test timed out after ${PROCESS_TIMEOUT_MS}ms`)),
-        PROCESS_TIMEOUT_MS,
-      )
-    );
-    output = await Promise.race([proc.output(), timeout]);
-  } catch (e) {
-    const durationMs = Math.round(performance.now() - start);
-    for (const th of testHashes) {
-      db.insertTestRun({
-        testAtom: th,
-        targetAtom: targetHash,
-        runBy: "checker",
-        result: "fail",
-        durationMs,
-        details: (e as Error).message,
-      });
-    }
-    return new Response((e as Error).message, { status: 422 });
-  }
-  const durationMs = Math.round(performance.now() - start);
-  const passed = output.code === 0;
-  const text = new TextDecoder().decode(output.stdout) +
-    new TextDecoder().decode(output.stderr);
+
+  const result = await res.json() as {
+    passed: boolean;
+    durationMs: number;
+    stdout: string;
+    stderr: string;
+  };
 
   for (const th of testHashes) {
     db.insertTestRun({
       testAtom: th,
       targetAtom: targetHash,
       runBy: "checker",
-      result: passed ? "pass" : "fail",
-      durationMs,
-      details: passed ? null : text,
+      result: result.passed ? "pass" : "fail",
+      durationMs: result.durationMs,
+      details: result.passed ? null : result.stdout + result.stderr,
     });
   }
 
-  if (!passed) {
-    return new Response(text, { status: 422 });
+  if (!result.passed) {
+    return new Response(result.stdout + result.stderr, { status: 422 });
   }
   return null;
 }
@@ -1407,6 +1374,7 @@ export interface ServerConfig {
   dbPath: string;
   devToken?: string;
   adminToken?: string;
+  checkerUrl: string;
   skipEmbedCheck?: boolean;
   embedUrl?: string;
   embedModel?: string;
@@ -1419,6 +1387,7 @@ export interface ServerHandle {
 }
 
 export function startServer(config: ServerConfig): ServerHandle {
+  checkerUrl = config.checkerUrl;
   authConfig = {
     devToken: config.devToken,
     adminToken: config.adminToken,
@@ -1475,7 +1444,16 @@ export function startServer(config: ServerConfig): ServerHandle {
   };
 }
 
-export async function serve(): Promise<void> {
+export async function serve(opts: {
+  port: number;
+  dataDir: string;
+  devToken: string;
+  adminToken: string;
+  checkerUrl: string;
+  embedUrl?: string;
+  embedModel?: string;
+  embedDim?: number;
+}): Promise<void> {
   try {
     await Deno.stat(`${UI_DIR}/app.html`);
   } catch {
@@ -1484,44 +1462,18 @@ export async function serve(): Promise<void> {
     Deno.exit(1);
   }
 
-  await Deno.mkdir(DATA_DIR, { recursive: true });
+  await Deno.mkdir(opts.dataDir, { recursive: true });
 
   const handle = startServer({
-    port: PORT,
-    dbPath: `${DATA_DIR}/zts.db`,
-    devToken: Deno.env.get("ZTS_DEV_TOKEN") || undefined,
-    adminToken: Deno.env.get("ZTS_ADMIN_TOKEN") || undefined,
+    port: opts.port,
+    dbPath: `${opts.dataDir}/zts.db`,
+    devToken: opts.devToken,
+    adminToken: opts.adminToken,
+    checkerUrl: opts.checkerUrl,
+    embedUrl: opts.embedUrl,
+    embedModel: opts.embedModel,
+    embedDim: opts.embedDim,
   });
 
-  console.log(`Listening on http://localhost:${handle.port}`);
-  console.log(
-    "  POST /a                          — store atom (requires X-Description header)",
-  );
-  console.log(
-    "  GET  /a/<aa>/<bb>/<rest>.ts      — retrieve code by content address",
-  );
-  console.log(
-    "  GET  /bundle/<hash>              — download zip bundle of atom + dependencies",
-  );
-  console.log(
-    "  GET  /recent?n=N&goal=G&all=1    — recent atoms (default 20)",
-  );
-  console.log(
-    "  GET  /info/<hash>                — full atom info (source, rels, tests)",
-  );
-  console.log(
-    "  POST /a/<hash>/description       — update description for an atom",
-  );
-  console.log(
-    "  GET  /a/<hash>/description       — retrieve description",
-  );
-  console.log(
-    "  GET  /search?q=<text>[&k=10]     — semantic nearest-neighbor search",
-  );
-  console.log(
-    "  GET  /similar/<hash>[?k=10]      — find similar atoms by embedding",
-  );
-  console.log(
-    "  Hash prefixes accepted everywhere (e.g. /info/3ax9 instead of full 25-char hash)",
-  );
+  console.log(`Server listening on http://localhost:${handle.port}`);
 }

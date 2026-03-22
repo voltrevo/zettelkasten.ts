@@ -17,6 +17,7 @@
     "jsr:@std/path@^1.1.4": "1.1.4",
     "npm:@noble/hashes@*": "1.8.0",
     "npm:@noble/hashes@^1.6.0": "1.8.0",
+    "npm:json5@^2.2.3": "2.2.3",
     "npm:typescript@^5.8.2": "5.9.3"
   },
   "jsr": {
@@ -81,6 +82,10 @@
     "@noble/hashes@1.8.0": {
       "integrity": "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="
     },
+    "json5@2.2.3": {
+      "integrity": "sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==",
+      "bin": true
+    },
     "typescript@5.9.3": {
       "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==",
       "bin": true
@@ -99,6 +104,7 @@
       "jsr:@std/assert@1",
       "jsr:@std/cli@^1.0.28",
       "npm:@noble/hashes@^1.6.0",
+      "npm:json5@^2.2.3",
       "npm:typescript@^5.8.2"
     ]
   }
