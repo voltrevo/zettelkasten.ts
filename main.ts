@@ -84,7 +84,7 @@ const dataDir = DEFAULT_DATA_DIR;
 const cfgPath = args.config ?? configPath(dataDir);
 
 // Commands that don't need config
-const NO_CONFIG_COMMANDS = new Set(["init", "checker", "size"]);
+const NO_CONFIG_COMMANDS = new Set(["init", "size"]);
 const [command, ...rest] = args._ as string[];
 const needsConfig = command && !NO_CONFIG_COMMANDS.has(command) && !args.h &&
   !args.help;
@@ -128,13 +128,13 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   Override with --config <path>.`,
 
   checker: `zts checker <run|start|stop|restart|log>
-  run       start checker in foreground (default port ${DEFAULT_CHECKER_PORT})
+  run       start checker in foreground
   start     install systemd user service and start
   stop      stop and disable
   restart   restart the daemon
   log       show process log (-f to follow, -n <lines>)
 
-  Override port with --port <N>.`,
+  Port configured via checkerPort in config.json5.`,
 
   log: `zts log [--recent N] [--op X] [--subject X]
   Query the structured audit log.
@@ -489,8 +489,7 @@ switch (command) {
   case "checker": {
     const sub = rest[0];
     if (sub === "run") {
-      const port = args.port ? parseInt(args.port, 10) : DEFAULT_CHECKER_PORT;
-      serveChecker(port);
+      serveChecker(cfg.checkerPort);
     } else if (sub === "start") {
       await startService(CHECKER_DEF);
     } else if (sub === "stop") {
