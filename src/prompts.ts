@@ -83,14 +83,14 @@ A test atom exports a class named Test with a static name and a run(target) meth
 
 ## Test quality
 
-Tests must verify correctness, not just existence. A good test:
-- Uses known-answer values (e.g. CRC-32 of "hello" = 0x3610A686, not just empty input)
-- Tests multiple cases including edge cases (empty, one element, large, negative)
-- Checks specific output values, not just "output.length > 0"
-- For binary formats: constructs real valid input and verifies exact decoded fields
+A good test suite is proof of correctness. If someone reads only your tests
+(not your code), they should be convinced the implementation is right.
+Ask: if all my tests pass, is there still a plausible way the code is wrong?
+If yes, add the test that closes that gap.
 
-A bad test only checks that the function doesn't crash. If the implementation
-returned garbage, would your test catch it? If not, make it stricter.
+Use known-answer values from authoritative sources (NIST test vectors, RFC
+examples, wolfram alpha, etc.). For crypto: use official test vectors. For
+parsers: use real valid inputs. For math: verify known identities.
 `;
 
 export const DEFAULT_ITERATION = `\
@@ -111,7 +111,9 @@ directly (handovers/next.md, notes/current.md, tmp/).
    behavior. Then search on that full description:
      zts search "<your full description>"
    Longer, more detailed queries produce significantly better matches.
-   If a usable match exists, reuse it (check with zts info and zts tops).
+   If a usable match exists, check zts tops <hash> before importing it —
+   tops walks the supersedes chain and returns the best current version.
+   Always import the top, not the original you found in search results.
    If not, proceed — you already have the description for -d.
 3. Work the TDD loop:
    - Write test atoms first: zts post -d "desc" --is-test -g <goal> <file>
