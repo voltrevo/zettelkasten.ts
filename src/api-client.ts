@@ -731,16 +731,13 @@ ${scriptBody}
         args: [
           "test",
           `--allow-import=${serverHost}`,
-          "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
           "--no-lock",
           runnerPath,
+          "--",
+          base,
+          hash,
+          testHashes.join(","),
         ],
-        env: {
-          ...d.env.toObject(),
-          ZTS_SERVER_URL: base,
-          ZTS_TARGET: hash,
-          ZTS_TESTS: testHashes.join(","),
-        },
         stdout: "piped",
         stderr: "piped",
       });

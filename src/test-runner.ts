@@ -1,17 +1,18 @@
 // Invoked as a test file:
-//   deno test --allow-import=<host> --allow-env src/test-runner.ts
+//   deno test --allow-import=<host> src/test-runner.ts -- <server-url> <target-hash> <test1,test2,...>
 //
-// Config passed via environment:
-//   ZTS_SERVER_URL  — base URL of the atom server
-//   ZTS_TARGET      — hash of the target atom
-//   ZTS_TESTS       — comma-separated list of test atom hashes
+// All config passed via CLI args (no env vars needed).
 
-const serverUrl = Deno.env.get("ZTS_SERVER_URL") ?? "http://localhost:8000";
-const targetHash = Deno.env.get("ZTS_TARGET") ?? "";
-const testHashesRaw = Deno.env.get("ZTS_TESTS") ?? "";
+const args = Deno.args;
+const dashdash = args.indexOf("--");
+const positional = dashdash >= 0 ? args.slice(dashdash + 1) : args;
 
-if (!targetHash || !testHashesRaw) {
-  throw new Error("ZTS_TARGET and ZTS_TESTS env vars are required");
+const [serverUrl, targetHash, testHashesRaw] = positional;
+
+if (!serverUrl || !targetHash || !testHashesRaw) {
+  throw new Error(
+    "usage: deno test ... src/test-runner.ts -- <server-url> <target-hash> <test-hashes>",
+  );
 }
 
 const testHashes = testHashesRaw.split(",").filter(Boolean);

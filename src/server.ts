@@ -88,15 +88,13 @@ async function runTests(
     args: [
       "test",
       `--allow-import=localhost:${serverPort}`,
-      "--allow-env=ZTS_SERVER_URL,ZTS_TARGET,ZTS_TESTS",
       "--no-lock",
       TEST_RUNNER,
+      "--",
+      serverUrl,
+      targetHash,
+      testHashes.join(","),
     ],
-    env: {
-      ZTS_SERVER_URL: serverUrl,
-      ZTS_TARGET: targetHash,
-      ZTS_TESTS: testHashes.join(","),
-    },
     stdout: "piped",
     stderr: "piped",
   });
