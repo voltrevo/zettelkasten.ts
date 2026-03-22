@@ -1,2 +1,3 @@
 corpus/
 .swp
+docker/.env

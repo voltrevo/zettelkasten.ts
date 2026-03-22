@@ -1,0 +1,44 @@
+# Stage 1: Get Claude Code
+FROM node:22-slim AS claude
+RUN npm install -g @anthropic-ai/claude-code
+
+# Stage 2: Deno + Claude Code + zts CLI
+FROM denoland/deno:latest
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates curl sudo procps && rm -rf /var/lib/apt/lists/*
+
+# Apt proxy config (gateway resolved at runtime via Docker DNS)
+RUN echo 'Acquire::http::Proxy "http://gateway:3128";' > /etc/apt/apt.conf.d/proxy.conf
+
+# Node runtime + Claude Code from stage 1
+COPY --from=claude /usr/local/bin/node /usr/local/bin/node
+COPY --from=claude /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js /usr/local/bin/claude
+
+# Install zts
+WORKDIR /opt/zts
+COPY deno.json deno.lock ./
+COPY src/ ./src/
+COPY main.ts run.ts ./
+RUN deno cache main.ts
+RUN deno install --global --allow-all --config deno.json -n zts main.ts
+
+# Non-root user (Claude Code requires this)
+RUN useradd -m -s /bin/bash zts && \
+    echo 'zts ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/zts && \
+    echo 'Defaults env_keep += "HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy"' >> /etc/sudoers.d/zts && \
+    su zts -c 'git config --global user.email "zts@agent" && git config --global user.name "zts"'
+
+# Pre-download SQLite native library and make deno dir accessible
+RUN deno eval "import { Database } from '@db/sqlite'; new Database(':memory:').close();"
+RUN chown -R zts:zts /deno-dir 2>/dev/null || true
+
+COPY docker/entrypoint-agent.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+USER zts
+WORKDIR /home/zts
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["sleep", "infinity"]

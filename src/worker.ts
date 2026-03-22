@@ -210,10 +210,21 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
 
   const maxIters = config.once ? 1 : config.maxIters;
 
+  // Handle graceful shutdown
+  let stopping = false;
+  Deno.addSignalListener("SIGINT", () => {
+    if (stopping) Deno.exit(1); // second ctrl+c force-kills
+    console.log("\n[worker] SIGINT received, finishing current iteration...");
+    stopping = true;
+  });
+  Deno.addSignalListener("SIGTERM", () => {
+    stopping = true;
+  });
+
   try {
     let iter = await readIteration(config);
 
-    while (maxIters === 0 || iter < maxIters) {
+    while (!stopping && (maxIters === 0 || iter < maxIters)) {
       iter++;
       const isRetrospective = iter > 0 && iter % RETROSPECTIVE_INTERVAL === 0;
       const mode = isRetrospective ? "retrospective" : "build";

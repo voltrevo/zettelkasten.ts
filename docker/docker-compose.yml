@@ -1,0 +1,89 @@
+services:
+  zts-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    container_name: zts-server
+    ports:
+      - "7483:7483"
+    environment:
+      - ZTS_DOCKER=1
+    volumes:
+      - zts-data:/data
+    networks:
+      - zts-net
+      - host-access
+    depends_on:
+      zts-checker:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
+  zts-checker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.checker
+    container_name: zts-checker
+    networks:
+      - zts-net
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - zts-net
+      - gateway-egress  # needs internet for model pulls
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gateway
+    container_name: gateway
+    networks:
+      zts-net:
+      gateway-egress:
+    restart: unless-stopped
+
+  zts-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: zts-agent
+    environment:
+      - ZTS_DEV_TOKEN
+      - HTTP_PROXY=http://gateway:3128
+      - HTTPS_PROXY=http://gateway:3128
+      - http_proxy=http://gateway:3128
+      - https_proxy=http://gateway:3128
+      - NO_PROXY=zts-server,zts-checker,ollama,localhost,127.0.0.1
+      - no_proxy=zts-server,zts-checker,ollama,localhost,127.0.0.1
+    volumes:
+      - agent-workspace:/home/zts/workspaces
+    networks:
+      - zts-net
+    depends_on:
+      - zts-server
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  zts-data:
+  ollama-models:
+  agent-workspace:
+
+networks:
+  zts-net:
+    internal: true
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+  host-access:
+    driver: bridge
+  gateway-egress:
+    driver: bridge

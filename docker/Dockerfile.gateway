@@ -1,0 +1,3 @@
+FROM ubuntu/squid:latest
+COPY docker/squid.conf /etc/squid/squid.conf
+EXPOSE 3128

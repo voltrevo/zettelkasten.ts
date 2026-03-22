@@ -1,0 +1,11 @@
+.git/
+ui/node_modules/
+ui/dist/
+workspaces/
+samples/
+notes/
+tmp/
+*.db
+*.log
+*.db-shm
+*.db-wal

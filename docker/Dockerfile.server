@@ -1,0 +1,38 @@
+# Stage 1: Build UI
+FROM node:22-slim AS ui-build
+WORKDIR /build
+COPY ui/package.json ui/package-lock.json ./ui/
+RUN cd ui && npm ci
+# Vite aliases resolve to ../src/ — need both dirs at sibling level
+COPY ui/ ./ui/
+COPY src/api-client.ts src/bundle.ts src/cap.ts ./src/
+RUN cd ui && npm run build
+
+# Stage 2: Deno runtime
+FROM denoland/deno:latest
+WORKDIR /opt/zts
+
+COPY deno.json deno.lock ./
+COPY src/ ./src/
+COPY main.ts run.ts ./
+
+# Pre-built UI from stage 1
+COPY --from=ui-build /build/ui/dist ./ui/dist/
+
+# Cache dependencies
+RUN deno cache main.ts
+# Pre-download SQLite native library (downloaded lazily by @db/sqlite FFI)
+RUN deno eval "import { Database } from '@db/sqlite'; new Database(':memory:').close();"
+
+# Data directory — mounted as volume
+RUN mkdir -p /data
+
+EXPOSE 7483
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD deno eval "const r = await fetch('http://localhost:7483/status'); if (!r.ok) Deno.exit(1);"
+
+COPY docker/entrypoint-server.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
