@@ -12,6 +12,16 @@ shell access for exploratory work — running code, inspecting output, generatin
 test vectors. Don't break the container (no rm -rf /, no killing system
 processes), but otherwise use it freely.
 
+The corpus server is at `{{server-url}}`. Atoms are served over HTTP at
+`{{server-url}}/atom/<hash[0:2]>/<hash[2:4]>/<hash[4:]>.ts`. You can import
+atoms directly from this URL in any Deno program:
+
+```ts
+import { foo } from "{{server-url}}/atom/1k/1b/ks5opabqf39499ludtcni.ts";
+```
+
+This works for both published atoms and your drafts.
+
 ## Atom rules
 
 1. **One value export.** Exactly one function, class, const, or enum per atom.
@@ -24,9 +34,8 @@ processes), but otherwise use it freely.
 4. **Size limit: 1024 bytes** gzipped after minification. The server minifies
    before measuring, so removing comments/whitespace won't help. If too big,
    split into smaller atoms at natural boundaries.
-5. **Description required** via `-d`. ASCII only.
-6. **Description comment.** First line(s) of every atom must be a comment
-   duplicating the description. Comments are free (stripped by minifier).
+5. **Description comment.** First line(s) of every atom must be a comment
+   describing what it does. Comments are free (stripped by minifier).
 
 ## Pure TypeScript
 
@@ -79,7 +88,8 @@ If no external capabilities are needed, skip cap entirely.
 
 ## Testing
 
-Tests are atoms. Every non-test atom must have at least one test.
+Tests are atoms. Every non-test atom must have at least one test before it
+can be published.
 
 A test atom exports a class called `Test` with a `static name` and a
 `run(target)` method. The target is the thing being tested, passed as an
@@ -151,9 +161,8 @@ Relationship kinds: `imports`, `tests`, `supersedes`.
 - ASCII only in descriptions (no Unicode)
 - TypeScript type annotations count toward gzip budget (minifier can't strip them)
 - Use `127.0.0.1` not `localhost` for Deno TCP
-- Mark `supersedes` when your atom improves on an existing one
-- Tag atoms with goals: `-g <goal>`
-- `--no-tests` is a last resort — untested atoms block all downstream posts
+- Tag atoms with goals when publishing: `-g <goal>`
+- Mark `supersedes` when your atom improves on an existing one (between published atoms only)
 
 ---
 
@@ -182,31 +191,65 @@ what the goal needs. What matters is that you pick something you can build
 and test right now. If the atom you want needs dependencies that don't exist
 yet, build the dependency first.
 
-### 2. Build and explore
+### 2. Draft and explore
 
-Write a draft implementation. Run it — feed it inputs, inspect outputs, iterate.
-Fix bugs, handle edge cases you discover, try again. Keep going until you're
-satisfied it works. This exploration is what makes your tests real: the concrete
-values and edge cases you find here become your test vectors.
-
-### 3. Write tests and post
-
-Once you understand the behavior, write test atoms that prove it's correct.
-Post the tests first, then the atom with `-t`:
-
+Write your atom and submit it as a draft:
 ```
-zts post -d "<test description>" --is-test -g <goal> /tmp/test.ts
-zts post -d "<description>" -t <test1>,<test2> -g <goal> /tmp/atom.ts
+zts draft ./tmp/atom.ts
+```
+The server validates structure (one export, valid imports, size limit) and
+runs lint/type checks. You get back a hash.
+
+Now explore. Your draft is importable over HTTP, so you can write arbitrary
+Deno programs that use it:
+```ts
+// ./tmp/explore.ts
+import { myFn } from "{{server-url}}/atom/ab/cd/efghijklmnopqrstuvw.ts";
+
+console.log(myFn(42));
+console.log(myFn(-1));
+console.log(myFn(Number.MAX_SAFE_INTEGER));
+```
+```
+deno run -A ./tmp/explore.ts
 ```
 
-The server runs your tests on submission. 201 = success, 422 = test failure.
-If tests fail, fix the atom and retry. If the tests themselves are wrong,
-delete them (`zts delete <hash>`) and rewrite.
+Feed it inputs, inspect outputs, try edge cases. Iterate on the draft if
+needed — `zts draft` the revised file and continue exploring with the new
+hash. This is where you build real understanding of the behavior and generate
+concrete test values.
 
-### 4. Write your summary
+### 3. Add tests
 
-The platform collects your iteration summary automatically. Write it to the
-designated location — it will be presented to the next iteration as context.
+Once you understand the behavior, write test atoms that prove it's correct:
+```
+zts add-test ./tmp/test.ts --targets <draft-hash>
+```
+Each test runs immediately against the target. You get instant feedback —
+fix the test or the implementation and retry. Add as many tests as needed
+to be genuinely confident.
+
+### 4. Publish
+
+When your tests pass and you're confident:
+```
+zts publish <draft-hash> -d "<description>" -g <goal>
+```
+The description must be ASCII only. Publishing requires all imported atoms
+to already be published — if you depend on another draft, publish it first.
+Associated tests are auto-published alongside the atom.
+
+If your approach didn't work out, archive your drafts to clean up:
+```
+zts archive <draft-hash>
+```
+Unarchived drafts are cleaned up automatically after a day, so this is good
+practice but not required.
+
+### 5. Write your summary
+
+Write your summary to `summary/next.md`. The system reads and deletes this
+file between iterations — it will be presented to the next iteration as context.
 
 Include:
 - What you built (hash + description), or what you tried and why it failed
