@@ -1,6 +1,10 @@
-import { apiJson, h, registerPage, relTime, shortHash } from "../app.js";
+import { client, h, registerPage, relTime, shortHash } from "../app";
+import type { AtomSummary, CodeSearchResult, SearchResult } from "@zts/api-client";
+
+let cached: HTMLElement | null = null;
 
 registerPage("search", async () => {
+  if (cached) return cached;
   const root = h("div");
   root.append(h("h1", { class: "page-title" }, "Search"));
 
@@ -26,9 +30,9 @@ registerPage("search", async () => {
     type: "search",
     placeholder: "Search descriptions...",
     style: "flex:1",
-  });
+  }) as HTMLInputElement;
   const searchBtn = h("button", { class: "btn btn-sm" }, "Search");
-  const goalSelect = h("select", { style: "font-size:0.85rem" });
+  const goalSelect = h("select", { style: "font-size:0.85rem" }) as HTMLSelectElement;
   goalSelect.append(h("option", { value: "" }, "All goals"));
   const brokenToggle = h(
     "label",
@@ -47,13 +51,13 @@ registerPage("search", async () => {
 
   // Load goals for filter
   try {
-    const goals = await apiJson("/goals?all=1");
+    const goals = await client.listGoals({ all: true });
     for (const g of goals) {
       goalSelect.append(h("option", { value: g.name }, g.name));
     }
   } catch { /* ignore */ }
 
-  function setMode(m) {
+  function setMode(m: string): void {
     mode = m;
     semanticTab.classList.toggle("active", m === "semantic");
     codeTab.classList.toggle("active", m === "code");
@@ -63,40 +67,32 @@ registerPage("search", async () => {
   }
 
   searchBtn.addEventListener("click", doSearch);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") doSearch();
+  input.addEventListener("keydown", (e: Event) => {
+    if ((e as KeyboardEvent).key === "Enter") doSearch();
   });
   goalSelect.addEventListener("change", doSearch);
-  row.querySelector(".broken-check").addEventListener("change", doSearch);
+  (row.querySelector(".broken-check") as HTMLInputElement).addEventListener("change", doSearch);
 
-  async function doSearch() {
+  async function doSearch(): Promise<void> {
     const q = input.value.trim();
     const goal = goalSelect.value;
-    const broken = row.querySelector(".broken-check").checked;
+    const broken = (row.querySelector(".broken-check") as HTMLInputElement).checked;
 
     results.innerHTML = '<div class="loading">Loading</div>';
 
     try {
-      let data;
+      let data: (AtomSummary | SearchResult | CodeSearchResult)[];
       if (!q) {
-        // Browse mode — show recent atoms
-        const params = new URLSearchParams();
-        if (goal) params.set("goal", goal);
-        if (broken) params.set("broken", "1");
-        params.set("n", "50");
-        data = await apiJson(`/recent?${params}`);
+        // Browse mode -- show recent atoms
+        data = await client.recent({ n: 50, goal: goal || undefined, broken: broken || undefined });
       } else if (mode === "code") {
-        data = await apiJson(
-          `/search?code=${encodeURIComponent(q)}&k=50`,
-        );
+        data = await client.searchCode(q, 50);
       } else {
-        data = await apiJson(
-          `/search?q=${encodeURIComponent(q)}&k=50`,
-        );
+        data = await client.search(q, 50);
       }
 
       // Client-side filters for search results
-      if (q && goal) data = data.filter((a) => a.goal === goal);
+      if (q && goal) data = data.filter((a) => (a as AtomSummary).goal === goal);
       if (q && broken) {
         data = data.filter((a) => a.description?.startsWith("BROKEN:"));
       }
@@ -125,7 +121,7 @@ registerPage("search", async () => {
             shortHash(item.hash),
           ),
         );
-        if (item.score != null) {
+        if ("score" in item && item.score != null) {
           top.append(
             h("span", {
               style:
@@ -138,12 +134,12 @@ registerPage("search", async () => {
             h("span", { class: "badge badge-red" }, "BROKEN"),
           );
         }
-        if (item.goal) {
+        if ("goal" in item && item.goal) {
           top.append(
             h("span", { class: "badge badge-blue" }, item.goal),
           );
         }
-        if (item.createdAt) {
+        if ("createdAt" in item && item.createdAt) {
           top.append(
             h("span", {
               style: "font-size:0.75rem;color:var(--text-2)",
@@ -161,7 +157,7 @@ registerPage("search", async () => {
             ),
           );
         }
-        if (item.snippet) {
+        if ("snippet" in item && item.snippet) {
           const snip = h("div", {
             class: "code-block",
             style:
@@ -174,11 +170,12 @@ registerPage("search", async () => {
       }
       results.replaceChildren(list);
     } catch (e) {
-      results.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
+      results.innerHTML = `<div class="empty">Error: ${(e as Error).message}</div>`;
     }
   }
 
   // Default: show recent atoms
   await doSearch();
+  cached = root;
   return root;
 });

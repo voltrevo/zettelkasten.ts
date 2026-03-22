@@ -1,4 +1,4 @@
-import { apiJson, h, registerPage, relTime, shortHash } from "../app.js";
+import { client, h, registerPage, relTime, shortHash } from "../app";
 
 registerPage("log", async () => {
   const root = h("div");
@@ -6,7 +6,7 @@ registerPage("log", async () => {
 
   // Filters
   const filterBar = h("div", { class: "filter-bar" });
-  const opSelect = h("select");
+  const opSelect = h("select") as HTMLSelectElement;
   opSelect.append(h("option", { value: "" }, "All operations"));
   for (
     const op of [
@@ -32,7 +32,7 @@ registerPage("log", async () => {
     type: "text",
     placeholder: "Count (default 50)",
     style: "width:120px",
-  });
+  }) as HTMLInputElement;
   filterBar.append(
     opSelect,
     recentInput,
@@ -61,18 +61,17 @@ registerPage("log", async () => {
   tableWrap.append(table);
   root.append(tableWrap);
 
-  async function loadLog() {
-    const params = new URLSearchParams();
+  async function loadLog(): Promise<void> {
     const op = opSelect.value;
-    if (op) params.set("op", op);
-    const recent = recentInput.value.trim();
-    params.set("recent", recent || "50");
-    const qs = params.toString();
+    const recent = parseInt(recentInput.value.trim(), 10) || 50;
 
     tbody.replaceChildren(
       h("tr", {}, h("td", { colspan: "4", class: "loading" }, "Loading")),
     );
-    const data = await apiJson(`/log?${qs}`);
+    const data = await client.getLog({
+      op: op || undefined,
+      recent,
+    });
 
     tbody.replaceChildren();
     if (data.length === 0) {

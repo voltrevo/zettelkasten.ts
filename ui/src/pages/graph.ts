@@ -1,18 +1,19 @@
-import { apiJson, h, registerPage, shortHash } from "../app.js";
+import { client, h, registerPage, shortHash } from "../app";
+import type { AtomSummary, Relationship } from "@zts/api-client";
 
 registerPage("graph", async () => {
   const root = h("div");
   root.append(h("h1", { class: "page-title" }, "Dependency Graph"));
 
   const controls = h("div", { class: "filter-bar" });
-  const kindSelect = h("select");
+  const kindSelect = h("select") as HTMLSelectElement;
   kindSelect.append(
     h("option", { value: "imports" }, "imports"),
     h("option", { value: "tests" }, "tests"),
     h("option", { value: "supersedes" }, "supersedes"),
     h("option", { value: "" }, "all"),
   );
-  const sizeSelect = h("select");
+  const sizeSelect = h("select") as HTMLSelectElement;
   for (
     const [val, label] of [
       ["200", "200 atoms"],
@@ -30,14 +31,14 @@ registerPage("graph", async () => {
     min: "1",
     placeholder: "N",
     style: "width:5rem;display:none",
-  });
+  }) as HTMLInputElement;
   const labelStyle =
     "font-size:0.8rem;color:var(--text-2);display:flex;align-items:center;gap:0.5rem";
   const generateBtn = h(
     "button",
     { class: "btn btn-sm btn-primary" },
     "Generate",
-  );
+  ) as HTMLButtonElement;
   controls.append(
     h("label", { style: labelStyle }, "Relationship:", kindSelect),
     h("label", { style: labelStyle }, "Size:", sizeSelect, customInput),
@@ -53,49 +54,48 @@ registerPage("graph", async () => {
   root.append(container);
 
   // Load data
-  let atoms, rels;
+  let atoms: AtomSummary[];
 
-  function getLimit() {
+  function getLimit(): string {
     const val = sizeSelect.value;
     if (val === "all") return "all";
     if (val === "custom") return customInput.value || "200";
     return val;
   }
 
-  async function loadAtoms() {
+  async function loadAtoms(): Promise<AtomSummary[]> {
     const limit = getLimit();
-    const q = limit === "all" ? "all=1" : `n=${limit}`;
-    return await apiJson(`/recent?${q}`);
+    if (limit === "all") {
+      return await client.recent({ all: true });
+    }
+    return await client.recent({ n: parseInt(limit, 10) });
   }
 
   try {
-    [atoms, rels] = await Promise.all([
-      loadAtoms(),
-      apiJson("/relationships?kind=imports"),
-    ]);
+    atoms = await loadAtoms();
   } catch (e) {
     return h(
       "div",
       { class: "empty" },
-      `Could not load graph data: ${e.message}`,
+      `Could not load graph data: ${(e as Error).message}`,
     );
   }
 
-  const kindColors = {
+  const kindColors: Record<string, string> = {
     imports: "#6e8efa",
     tests: "#4ade80",
     supersedes: "#f87171",
   };
 
-  async function render(filterKind) {
-    let edges = rels;
+  async function render(filterKind: string): Promise<void> {
+    let edges: Relationship[];
     if (filterKind) {
-      edges = await apiJson(`/relationships?kind=${filterKind}`);
+      edges = await client.queryRelationships({ kind: filterKind });
     } else {
       const [imp, tst, sup] = await Promise.all([
-        apiJson("/relationships?kind=imports"),
-        apiJson("/relationships?kind=tests"),
-        apiJson("/relationships?kind=supersedes"),
+        client.queryRelationships({ kind: "imports" }),
+        client.queryRelationships({ kind: "tests" }),
+        client.queryRelationships({ kind: "supersedes" }),
       ]);
       edges = [...imp, ...tst, ...sup];
     }
@@ -123,7 +123,7 @@ registerPage("graph", async () => {
     const w = container.clientWidth;
     const ht = container.clientHeight;
 
-    // Simple force simulation (no D3 dependency — basic Fruchterman-Reingold)
+    // Simple force simulation (no D3 dependency -- basic Fruchterman-Reingold)
     const nodes = nodeArr.map((id) => ({
       id,
       x: w / 2 + (Math.random() - 0.5) * w * 0.6,
@@ -135,8 +135,8 @@ registerPage("graph", async () => {
     const links = edges
       .filter((e) => nodeMap.has(e.from) && nodeMap.has(e.to))
       .map((e) => ({
-        source: nodeMap.get(e.from),
-        target: nodeMap.get(e.to),
+        source: nodeMap.get(e.from)!,
+        target: nodeMap.get(e.to)!,
         kind: e.kind,
       }));
 
@@ -199,10 +199,10 @@ registerPage("graph", async () => {
         "http://www.w3.org/2000/svg",
         "line",
       );
-      line.setAttribute("x1", s.x);
-      line.setAttribute("y1", s.y);
-      line.setAttribute("x2", t.x);
-      line.setAttribute("y2", t.y);
+      line.setAttribute("x1", String(s.x));
+      line.setAttribute("y1", String(s.y));
+      line.setAttribute("x2", String(t.x));
+      line.setAttribute("y2", String(t.y));
       line.setAttribute("stroke", kindColors[l.kind] ?? "#606078");
       line.setAttribute("stroke-width", "1");
       line.setAttribute("stroke-opacity", "0.4");
@@ -223,8 +223,8 @@ registerPage("graph", async () => {
         "http://www.w3.org/2000/svg",
         "circle",
       );
-      circle.setAttribute("cx", n.x);
-      circle.setAttribute("cy", n.y);
+      circle.setAttribute("cx", String(n.x));
+      circle.setAttribute("cy", String(n.y));
       circle.setAttribute("r", "4");
       circle.setAttribute(
         "fill",
@@ -236,7 +236,7 @@ registerPage("graph", async () => {
       circle.addEventListener("click", () => {
         location.hash = `#/atom/${n.id}`;
       });
-      circle.addEventListener("mouseenter", (e) => {
+      circle.addEventListener("mouseenter", () => {
         const a = atomMap.get(n.id);
         tooltip.textContent = `${shortHash(n.id)} ${
           a?.description?.slice(0, 80) ?? ""
@@ -277,12 +277,12 @@ registerPage("graph", async () => {
     container.append(legend);
   }
 
-  function markStale() {
+  function markStale(): void {
     container.style.opacity = "0.35";
     container.style.pointerEvents = "none";
   }
 
-  async function generate() {
+  async function generate(): Promise<void> {
     generateBtn.disabled = true;
     generateBtn.textContent = "Loading...";
     try {

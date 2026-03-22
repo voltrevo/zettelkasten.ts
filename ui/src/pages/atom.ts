@@ -1,18 +1,19 @@
 import {
-  api,
-  apiJson,
+  client,
   h,
+  highlightTs,
   navigate,
   registerPage,
   relTime,
   shortHash,
-} from "../app.js";
+} from "../app";
+import { ApiError } from "@zts/api-client";
 
-registerPage("atom", async (args) => {
+registerPage("atom", async (args: string[]) => {
   const hash = args[0];
   if (!hash) return h("div", { class: "empty" }, "No hash specified");
 
-  const info = await apiJson(`/info/${hash}`);
+  const info = await client.info(hash);
   const root = h("div");
 
   // Breadcrumb
@@ -51,20 +52,16 @@ registerPage("atom", async (args) => {
     title: starred ? "Unstar" : "Star",
   }, starred ? "\u2605" : "\u2606");
   starBtn.addEventListener("click", async () => {
-    const res = starred
-      ? await api("/properties", {
-        method: "DELETE",
-        body: JSON.stringify({ hash: info.hash, key: "starred" }),
-      })
-      : await api("/properties", {
-        method: "POST",
-        body: JSON.stringify({ hash: info.hash, key: "starred", value: "1" }),
-      });
-    if (res.ok) {
+    try {
+      if (starred) {
+        await client.unsetProperty(info.hash, "starred");
+      } else {
+        await client.setProperty(info.hash, "starred", "1");
+      }
       starred = !starred;
       starBtn.textContent = starred ? "\u2605" : "\u2606";
       starBtn.title = starred ? "Unstar" : "Star";
-    }
+    } catch { /* ignore */ }
   });
   header.append(starBtn);
 
@@ -101,7 +98,7 @@ registerPage("atom", async (args) => {
   }, "Description");
   const descText = h("textarea", {
     style: "width:100%;min-height:120px",
-  });
+  }) as HTMLTextAreaElement;
   descText.value = info.description ?? "";
   const descSave = h("button", {
     class: "btn btn-sm btn-ghost",
@@ -112,19 +109,14 @@ registerPage("atom", async (args) => {
   });
   descSave.addEventListener("click", async () => {
     try {
-      const res = await api(`/a/${info.hash}/description`, {
-        method: "POST",
-        body: descText.value,
-        headers: { "content-type": "text/plain" },
-      });
-      if (res.ok) {
-        await navigate(`#/atom/${info.hash}`);
-      } else {
-        descStatus.textContent = await res.text();
-        descStatus.style.color = "var(--red)";
-      }
+      await client.describeUpdate(info.hash, descText.value);
+      await navigate(`#/atom/${info.hash}`);
     } catch (e) {
-      descStatus.textContent = e.message;
+      if (e instanceof ApiError) {
+        descStatus.textContent = e.message;
+      } else {
+        descStatus.textContent = (e as Error).message;
+      }
       descStatus.style.color = "var(--red)";
     }
   });
@@ -139,20 +131,18 @@ registerPage("atom", async (args) => {
       style: "margin:0;overflow-x:auto",
     });
     const code = h("code", { class: "language-typescript" });
-    code.textContent = info.source;
+    code.innerHTML = highlightTs(info.source);
     pre.append(code);
-    // deno-lint-ignore no-window
-    if (window.Prism) window.Prism.highlightElement(code);
     // Make import paths clickable
     for (const str of code.querySelectorAll(".token.string")) {
-      const m = str.textContent.match(
+      const m = str.textContent?.match(
         /["']\.\.\/\.\.\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]{21})\.ts["']/,
       );
       if (m) {
-        const hash = m[1] + m[2] + m[3];
+        const depHash = m[1] + m[2] + m[3];
         const link = document.createElement("a");
-        link.href = `#/atom/${hash}`;
-        link.textContent = str.textContent;
+        link.href = `#/atom/${depHash}`;
+        link.textContent = str.textContent!;
         link.style.color = "inherit";
         link.style.textDecoration = "none";
         str.replaceChildren(link);
@@ -168,7 +158,7 @@ registerPage("atom", async (args) => {
   const headingStyle =
     "font-size:0.75rem;color:var(--text-2);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.25rem";
 
-  function hashList(title, hashes) {
+  function hashList(title: string, hashes: string[]): HTMLElement {
     const section = h("div", { style: "margin-bottom:0.75rem" });
     const count = hashes?.length ?? 0;
     section.append(h("div", { style: headingStyle }, `${title} (${count})`));
@@ -176,9 +166,9 @@ registerPage("atom", async (args) => {
       const list = h("div", {
         style: "display:flex;flex-wrap:wrap;gap:0.5rem",
       });
-      for (const hash of hashes) {
+      for (const h_ of hashes) {
         list.append(
-          h("a", { href: `#/atom/${hash}`, class: "hash" }, shortHash(hash)),
+          h("a", { href: `#/atom/${h_}`, class: "hash" }, shortHash(h_)),
         );
       }
       section.append(list);
@@ -233,7 +223,7 @@ registerPage("atom", async (args) => {
   // Test runs
   const runsSection = h("div", { style: "margin-bottom:0.75rem" });
   try {
-    const runs = await apiJson(`/test-runs?target=${info.hash}&recent=10`);
+    const runs = await client.getTestRuns({ target: info.hash, recent: 10 });
     runsSection.append(h("div", {
       style: headingStyle,
     }, `Test Runs (${runs.length})`));
@@ -300,7 +290,7 @@ registerPage("atom", async (args) => {
   const similarSection = h("div", { class: "card", style: "margin-top:1rem" });
   similarSection.append(h("div", { style: headingStyle }, "Similar"));
   try {
-    const hits = await apiJson(`/similar/${info.hash}?k=10`);
+    const hits = await client.similar(info.hash, 10);
     if (hits.length === 0) {
       similarSection.append(
         h("div", { style: "font-size:0.8rem;color:var(--text-2)" }, "none"),
@@ -351,11 +341,15 @@ registerPage("atom", async (args) => {
     if (
       !confirm(`Delete atom ${shortHash(info.hash)}? This cannot be undone.`)
     ) return;
-    const res = await api(`/a/${info.hash}`, { method: "DELETE" });
-    if (res.ok) {
+    try {
+      await client.deleteAtom(info.hash);
       location.hash = "#/corpus";
-    } else {
-      deleteStatus.textContent = await res.text();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        deleteStatus.textContent = e.message;
+      } else {
+        deleteStatus.textContent = (e as Error).message;
+      }
       deleteStatus.style.color = "var(--red)";
     }
   });

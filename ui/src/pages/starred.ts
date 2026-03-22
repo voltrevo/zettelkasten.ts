@@ -1,4 +1,4 @@
-import { apiJson, h, registerPage, relTime, shortHash } from "../app.js";
+import { client, h, registerPage, relTime, shortHash } from "../app";
 
 registerPage("starred", async () => {
   const root = h("div");
@@ -8,7 +8,7 @@ registerPage("starred", async () => {
   root.append(list);
 
   list.innerHTML = '<div class="loading">Loading</div>';
-  const atoms = await apiJson("/recent?prop=starred&all=1");
+  const atoms = await client.recent({ prop: "starred", all: true });
 
   if (atoms.length === 0) {
     list.innerHTML = '<div class="empty">No starred atoms</div>';

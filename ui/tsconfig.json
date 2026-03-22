@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "paths": {
+      "@zts/api-client": ["../src/api-client.ts"],
+      "@zts/cap": ["../src/cap.ts"],
+      "@zts/bundle": ["../src/bundle.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "../src/api-client.ts", "../src/bundle.ts"]
+}

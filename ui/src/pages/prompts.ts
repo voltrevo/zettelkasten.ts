@@ -1,4 +1,5 @@
-import { api, h, registerPage } from "../app.js";
+import { client, h, registerPage } from "../app";
+import { ApiError } from "@zts/api-client";
 
 registerPage("prompts", async () => {
   const root = h("div");
@@ -7,7 +8,7 @@ registerPage("prompts", async () => {
   // Prompt name tabs (context / iteration / retrospective)
   const promptTabs = h("div", { class: "tabs" });
   const names = ["context", "iteration", "retrospective"];
-  const promptBtns = {};
+  const promptBtns: Record<string, HTMLElement> = {};
 
   for (const name of names) {
     const btn = h(
@@ -31,7 +32,7 @@ registerPage("prompts", async () => {
       "display:flex;gap:0.25rem;margin-bottom:0.75rem;border-bottom:1px solid var(--border);padding-bottom:0.5rem",
   });
   const viewModes = ["default", "diff", "current"];
-  const viewBtns = {};
+  const viewBtns: Record<string, HTMLElement> = {};
   let activeView = "current";
 
   for (const mode of viewModes) {
@@ -49,7 +50,7 @@ registerPage("prompts", async () => {
   const editorArea = h("textarea", {
     style:
       "width:100%;min-height:500px;font-family:var(--mono);font-size:0.8rem",
-  });
+  }) as HTMLTextAreaElement;
   const diffView = h("div", {
     style:
       "width:100%;min-height:500px;overflow:auto;font-family:var(--mono);font-size:0.8rem;white-space:pre-wrap;border:1px solid var(--border);border-radius:6px;padding:0.75rem;background:var(--bg-1)",
@@ -78,7 +79,7 @@ registerPage("prompts", async () => {
   let currentText = "";
   let defaultText = "";
 
-  function switchView(mode) {
+  function switchView(mode: string): void {
     activeView = mode;
     for (const [m, btn] of Object.entries(viewBtns)) {
       btn.style.fontWeight = m === mode ? "700" : "400";
@@ -92,26 +93,26 @@ registerPage("prompts", async () => {
       editorArea.readOnly = false;
       editorArea.style.opacity = "1";
       contentWrap.append(editorArea);
-      saveBtn.hidden = false;
-      resetBtn.hidden = false;
+      (saveBtn as HTMLButtonElement).hidden = false;
+      (resetBtn as HTMLButtonElement).hidden = false;
     } else if (mode === "default") {
       editorArea.value = defaultText;
       editorArea.readOnly = true;
       editorArea.style.opacity = "0.6";
       contentWrap.append(editorArea);
-      saveBtn.hidden = true;
-      resetBtn.hidden = false;
+      (saveBtn as HTMLButtonElement).hidden = true;
+      (resetBtn as HTMLButtonElement).hidden = false;
     } else {
       // diff
       diffView.replaceChildren();
       diffView.append(buildDiff(defaultText, currentText));
       contentWrap.append(diffView);
-      saveBtn.hidden = true;
-      resetBtn.hidden = true;
+      (saveBtn as HTMLButtonElement).hidden = true;
+      (resetBtn as HTMLButtonElement).hidden = true;
     }
   }
 
-  function buildDiff(a, b) {
+  function buildDiff(a: string, b: string): DocumentFragment {
     const frag = document.createDocumentFragment();
     const aLines = a.split("\n");
     const bLines = b.split("\n");
@@ -119,7 +120,7 @@ registerPage("prompts", async () => {
     if (a === b) {
       const span = document.createElement("span");
       span.style.color = "var(--text-2)";
-      span.textContent = "(no differences — using default)";
+      span.textContent = "(no differences -- using default)";
       frag.append(span);
       return frag;
     }
@@ -153,7 +154,7 @@ registerPage("prompts", async () => {
     return frag;
   }
 
-  function lcsLines(a, b) {
+  function lcsLines(a: string[], b: string[]): string[] {
     const m = a.length, n = b.length;
     // For large prompts, limit to avoid perf issues
     if (m * n > 500000) return [];
@@ -165,7 +166,7 @@ registerPage("prompts", async () => {
           : Math.max(dp[i - 1][j], dp[i][j - 1]);
       }
     }
-    const result = [];
+    const result: string[] = [];
     let i = m, j = n;
     while (i > 0 && j > 0) {
       if (a[i - 1] === b[j - 1]) {
@@ -181,7 +182,7 @@ registerPage("prompts", async () => {
     return result;
   }
 
-  function diffLine(prefix, text) {
+  function diffLine(prefix: string, text: string): HTMLDivElement {
     const div = document.createElement("div");
     div.style.fontFamily = "var(--mono)";
     div.style.fontSize = "0.8rem";
@@ -198,7 +199,7 @@ registerPage("prompts", async () => {
     return div;
   }
 
-  async function loadPrompt(name) {
+  async function loadPrompt(name: string): Promise<void> {
     currentName = name;
     for (const [n, btn] of Object.entries(promptBtns)) {
       btn.classList.toggle("active", n === name);
@@ -206,16 +207,16 @@ registerPage("prompts", async () => {
     status.textContent = "";
 
     try {
-      const [currentRes, defaultRes] = await Promise.all([
-        fetch(`/prompts/${name}`, { credentials: "same-origin" }),
-        fetch(`/prompts/${name}?default=1`, { credentials: "same-origin" }),
+      const [currentResult, defaultResult] = await Promise.all([
+        client.getPrompt(name),
+        client.getPrompt(name, true),
       ]);
-      currentText = currentRes.ok ? await currentRes.text() : "";
-      defaultText = defaultRes.ok ? await defaultRes.text() : "";
+      currentText = currentResult.text;
+      defaultText = defaultResult.text;
       if (!currentText) currentText = defaultText;
       switchView(activeView);
     } catch (e) {
-      status.textContent = e.message;
+      status.textContent = (e as Error).message;
       status.style.color = "var(--red)";
     }
   }
@@ -230,17 +231,17 @@ registerPage("prompts", async () => {
   saveBtn.addEventListener("click", async () => {
     if (!currentName) return;
     currentText = editorArea.value;
-    const res = await api(`/prompts/${currentName}`, {
-      method: "PUT",
-      body: currentText,
-      headers: { "content-type": "text/plain" },
-    });
-    if (res.ok) {
+    try {
+      await client.setPrompt(currentName, currentText);
       status.textContent = "Saved";
       status.style.color = "var(--green)";
       await loadPrompt(currentName);
-    } else {
-      status.textContent = await res.text();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        status.textContent = e.message;
+      } else {
+        status.textContent = (e as Error).message;
+      }
       status.style.color = "var(--red)";
     }
   });
@@ -248,13 +249,17 @@ registerPage("prompts", async () => {
   resetBtn.addEventListener("click", async () => {
     if (!currentName) return;
     if (!confirm(`Reset ${currentName} prompt to default?`)) return;
-    const res = await api(`/prompts/${currentName}`, { method: "DELETE" });
-    if (res.ok) {
+    try {
+      await client.resetPrompt(currentName);
       status.textContent = "Reset to default";
       status.style.color = "var(--green)";
       await loadPrompt(currentName);
-    } else {
-      status.textContent = await res.text();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        status.textContent = e.message;
+      } else {
+        status.textContent = (e as Error).message;
+      }
       status.style.color = "var(--red)";
     }
   });

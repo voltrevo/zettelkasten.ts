@@ -10,10 +10,10 @@
     "typescript": "npm:typescript@^5.8.2"
   },
   "fmt": {
-    "exclude": ["samples/"]
+    "exclude": ["samples/", "ui/node_modules/", "ui/dist/"]
   },
   "lint": {
-    "exclude": ["samples/", "src/ui/"]
+    "exclude": ["samples/", "ui/"]
   },
   "lock": {
     "frozen": false,
@@ -25,6 +25,8 @@
     "test": "deno test --allow-env --allow-ffi --allow-read --allow-net=localhost,0.0.0.0 src/ --ignore=src/integration.test.ts",
     "test:integration": "deno test --allow-env --allow-ffi --allow-read --allow-net=localhost,127.0.0.1,0.0.0.0 --allow-write=/tmp/zts-test --allow-run=deno src/integration.test.ts",
     "test:all": "deno task test && deno task test:integration",
-    "precommit": "deno fmt && deno check main.ts && deno task test:all && deno lint"
+    "ui:dev": "cd ui && npm run dev",
+    "ui:build": "cd ui && npm run build",
+    "precommit": "deno fmt && deno check main.ts && deno task test:all && deno lint && deno task ui:build"
   }
 }

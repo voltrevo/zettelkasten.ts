@@ -35,7 +35,7 @@ const PROCESS_TIMEOUT_MS = 5000; // process lifecycle (startup + import + run)
 
 const ADMIN_ONLY_PROPERTIES = new Set(["starred"]);
 
-const UI_DIR = new URL("./ui", import.meta.url).pathname;
+const UI_DIR = new URL("../ui/dist", import.meta.url).pathname;
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -1456,6 +1456,14 @@ export function startServer(config: ServerConfig): ServerHandle {
 }
 
 export async function serve(): Promise<void> {
+  try {
+    await Deno.stat(`${UI_DIR}/app.html`);
+  } catch {
+    console.error("error: UI has not been built.");
+    console.error("  Run:  cd ui && npm install && npm run build");
+    Deno.exit(1);
+  }
+
   await Deno.mkdir(DATA_DIR, { recursive: true });
 
   const handle = startServer({

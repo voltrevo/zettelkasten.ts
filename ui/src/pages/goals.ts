@@ -1,20 +1,20 @@
 import {
-  api,
-  apiJson,
+  client,
   h,
   navigate,
   registerPage,
   relTime,
   shortHash,
-} from "../app.js";
+} from "../app";
+import { ApiError } from "@zts/api-client";
 
-registerPage("goals", async (args) => {
+registerPage("goals", async (args: string[]) => {
   // If subpath, show goal detail
   if (args.length > 0) return goalDetail(decodeURIComponent(args.join("/")));
   return goalList();
 });
 
-async function goalList() {
+async function goalList(): Promise<HTMLElement> {
   const root = h("div");
   root.append(h("h1", { class: "page-title" }, "Goals"));
 
@@ -39,7 +39,7 @@ async function goalList() {
   const list = h("div");
   root.append(list);
 
-  async function setFilter(f) {
+  async function setFilter(f: string): Promise<void> {
     filter = f;
     activeTab.classList.toggle("active", f === "active");
     doneTab.classList.toggle("active", f === "done");
@@ -47,14 +47,14 @@ async function goalList() {
     await renderList();
   }
 
-  async function renderList() {
+  async function renderList(): Promise<void> {
     list.innerHTML = '<div class="loading">Loading</div>';
-    const params = filter === "done"
-      ? "?done=1"
+    const opts = filter === "done"
+      ? { done: true }
       : filter === "all"
-      ? "?all=1"
-      : "";
-    const goals = await apiJson(`/goals${params}`);
+      ? { all: true }
+      : {};
+    const goals = await client.listGoals(opts);
 
     if (goals.length === 0) {
       list.innerHTML = '<div class="empty">No goals</div>';
@@ -109,8 +109,8 @@ async function goalList() {
   return root;
 }
 
-async function goalDetail(name) {
-  const goal = await apiJson(`/goals/${encodeURIComponent(name)}`);
+async function goalDetail(name: string): Promise<HTMLElement> {
+  const goal = await client.getGoal(name);
   const root = h("div");
 
   root.append(
@@ -150,7 +150,7 @@ async function goalDetail(name) {
     value: String(goal.weight ?? 1),
     min: "0",
     style: "width:5rem",
-  });
+  }) as HTMLInputElement;
   weightRow.append(weightInput);
   editSection.append(weightRow);
 
@@ -165,7 +165,7 @@ async function goalDetail(name) {
     style:
       "width:100%;min-height:6rem;font-family:var(--mono);font-size:0.8rem",
     placeholder: "Goal description...",
-  });
+  }) as HTMLTextAreaElement;
   bodyInput.value = goal.body ?? "";
   bodyRow.append(bodyInput);
   editSection.append(bodyRow);
@@ -176,19 +176,20 @@ async function goalDetail(name) {
   const saveBtn = h("button", { class: "btn btn-sm btn-primary" }, "Save");
   const editStatus = h("span", { style: "font-size:0.8rem" });
   saveBtn.addEventListener("click", async () => {
-    const res = await api(`/goals/${encodeURIComponent(name)}`, {
-      method: "PATCH",
-      body: JSON.stringify({
+    try {
+      await client.updateGoal(name, {
         weight: parseInt(weightInput.value, 10) || 1,
         body: bodyInput.value,
-      }),
-    });
-    if (res.ok) {
+      });
       editStatus.textContent = "Saved";
       editStatus.style.color = "var(--green)";
       setTimeout(() => editStatus.textContent = "", 2000);
-    } else {
-      editStatus.textContent = await res.text();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        editStatus.textContent = e.message;
+      } else {
+        editStatus.textContent = (e as Error).message;
+      }
       editStatus.style.color = "var(--red)";
     }
   });
@@ -209,13 +210,15 @@ async function goalDetail(name) {
       "Mark Done",
     );
     doneBtn.addEventListener("click", async () => {
-      const res = await api(`/goals/${encodeURIComponent(name)}/done`, {
-        method: "POST",
-      });
-      if (res.ok) {
+      try {
+        await client.markGoalDone(name);
         await navigate(`#/goals/${encodeURIComponent(name)}`);
-      } else {
-        actionStatus.textContent = await res.text();
+      } catch (e) {
+        if (e instanceof ApiError) {
+          actionStatus.textContent = e.message;
+        } else {
+          actionStatus.textContent = (e as Error).message;
+        }
         actionStatus.style.color = "var(--red)";
       }
     });
@@ -227,13 +230,15 @@ async function goalDetail(name) {
       "Mark Undone",
     );
     undoneBtn.addEventListener("click", async () => {
-      const res = await api(`/goals/${encodeURIComponent(name)}/undone`, {
-        method: "POST",
-      });
-      if (res.ok) {
+      try {
+        await client.markGoalUndone(name);
         await navigate(`#/goals/${encodeURIComponent(name)}`);
-      } else {
-        actionStatus.textContent = await res.text();
+      } catch (e) {
+        if (e instanceof ApiError) {
+          actionStatus.textContent = e.message;
+        } else {
+          actionStatus.textContent = (e as Error).message;
+        }
         actionStatus.style.color = "var(--red)";
       }
     });
@@ -247,13 +252,15 @@ async function goalDetail(name) {
   );
   deleteBtn.addEventListener("click", async () => {
     if (!confirm(`Delete goal "${name}"? This cannot be undone.`)) return;
-    const res = await api(`/goals/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
+    try {
+      await client.deleteGoal(name);
       location.hash = "#/goals";
-    } else {
-      actionStatus.textContent = await res.text();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        actionStatus.textContent = e.message;
+      } else {
+        actionStatus.textContent = (e as Error).message;
+      }
       actionStatus.style.color = "var(--red)";
     }
   });
@@ -261,7 +268,7 @@ async function goalDetail(name) {
   root.append(actions);
 
   // Atoms contributing to this goal
-  const atoms = await apiJson(`/recent?goal=${encodeURIComponent(name)}&all=1`);
+  const atoms = await client.recent({ goal: name, all: true });
   if (atoms.length > 0) {
     root.append(
       h("h2", {
@@ -334,11 +341,10 @@ async function goalDetail(name) {
           "font-size:1rem;color:var(--red);padding:0.2rem 0.5rem;flex-shrink:0;opacity:0.6",
         title: "Delete comment",
         onclick: async () => {
-          const res = await api(
-            `/goals/${encodeURIComponent(name)}/comments/${c.id}`,
-            { method: "DELETE" },
-          );
-          if (res.ok) await navigate(`#/goals/${encodeURIComponent(name)}`);
+          try {
+            await client.deleteGoalComment(name, c.id);
+            await navigate(`#/goals/${encodeURIComponent(name)}`);
+          } catch { /* ignore */ }
         },
       }, "\u00d7");
       item.append(content, delBtn);
@@ -355,22 +361,18 @@ async function goalDetail(name) {
     type: "text",
     placeholder: "Add a comment...",
     style: "flex:1",
-  });
-  async function submitComment() {
+  }) as HTMLInputElement;
+  async function submitComment(): Promise<void> {
     const text = commentInput.value.trim();
     if (!text) return;
-    const res = await api(`/goals/${encodeURIComponent(name)}/comments`, {
-      method: "POST",
-      body: text,
-      headers: { "content-type": "text/plain" },
-    });
-    if (res.ok) {
+    try {
+      await client.addGoalComment(name, text);
       commentInput.value = "";
       await navigate(`#/goals/${encodeURIComponent(name)}`);
-    }
+    } catch { /* ignore */ }
   }
-  commentInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+  commentInput.addEventListener("keydown", (e: Event) => {
+    if ((e as KeyboardEvent).key === "Enter") {
       e.preventDefault();
       submitComment();
     }
