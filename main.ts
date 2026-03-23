@@ -356,7 +356,7 @@ const CHECKER_DEF: ServiceDef = {
   description: "Zettelkasten test checker",
   command: "checker run",
   logFile: CHECKER_LOG,
-  perms: "--allow-net --allow-run=deno --allow-read",
+  perms: "--allow-net --allow-run --allow-read --allow-env --allow-write=/tmp --allow-ffi",
 };
 
 async function installService(def: ServiceDef): Promise<void> {
