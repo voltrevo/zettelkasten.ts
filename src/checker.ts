@@ -93,7 +93,9 @@ async function handleCheck(req: Request): Promise<Response> {
       output = { code: status.code, stdout, stderr };
     } catch (e) {
       clearTimeout(timer!);
-      try { child.kill(); } catch { /* already dead */ }
+      try {
+        child.kill();
+      } catch { /* already dead */ }
       throw e;
     }
   } catch (e) {
@@ -168,7 +170,13 @@ async function handleValidateTest(req: Request): Promise<Response> {
   const valid = isTestAtom(source);
   const testName = valid ? extractTestName(source) : null;
   return new Response(
-    JSON.stringify({ valid, testName, diagnostics: valid ? "" : "Not a valid test atom: must export a class named Test" }),
+    JSON.stringify({
+      valid,
+      testName,
+      diagnostics: valid
+        ? ""
+        : "Not a valid test atom: must export a class named Test",
+    }),
     { headers: { "content-type": "application/json" } },
   );
 }

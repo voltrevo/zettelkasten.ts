@@ -11,8 +11,8 @@ from scratch.
 Scan atom source at submission time for banned global references. Reject atoms
 that use them. Could be:
 
-1. **AST scan in `validateAtom`** — walk the TypeScript AST looking for
-   member access on banned globals (`crypto.subtle.*`, `new CompressionStream`,
+1. **AST scan in `validateAtom`** — walk the TypeScript AST looking for member
+   access on banned globals (`crypto.subtle.*`, `new CompressionStream`,
    `new DecompressionStream`, `new WebSocket`, etc.)
 
 2. **Custom deno lint plugin** — run in the checker alongside existing lint.

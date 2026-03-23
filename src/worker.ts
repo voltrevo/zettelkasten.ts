@@ -230,9 +230,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       // Fetch prompt
       const rawPrompt = await getPrompt(
         isRetrospective ? "retrospective" : "prompt",
-        isRetrospective
-          ? config.retrospectivePromptFile
-          : config.promptFile,
+        isRetrospective ? config.retrospectivePromptFile : config.promptFile,
         config.serverUrl,
       );
 
@@ -246,8 +244,18 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       const iterPad = String(iter).padStart(4, "0");
       let prompt = rawPrompt
         .replace(/\{\{server-url\}\}/g, config.serverUrl)
-        .replace(/\{\{summary\}\}/g, summary || "(First iteration — no previous summary.)")
-        .replace(/\{\{goal\}\}/g, "(Goal will be selected by the agent via zts goal pick)");
+        .replace(
+          /\{\{workspace\}\}/g,
+          dir.startsWith("/") ? dir : `${Deno.cwd()}/${dir}`,
+        )
+        .replace(
+          /\{\{summary\}\}/g,
+          summary || "(First iteration — no previous summary.)",
+        )
+        .replace(
+          /\{\{goal\}\}/g,
+          "(Goal will be selected by the agent via zts goal pick)",
+        );
       // {{cli-help}} is expanded lazily — TODO: capture zts -h output
       prompt += `\n\nCurrent iteration: ${iter}\nChannel: ${config.channel}\n`;
       if (isRetrospective) {
@@ -305,7 +313,6 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       // Create log dir for this iteration
       const iterLogDir = `${dir}/logs/iter-${String(iter).padStart(4, "0")}`;
       await Deno.mkdir(iterLogDir, { recursive: true });
-
 
       // Build claude args
       const claudeArgs: string[] = [];
@@ -401,15 +408,18 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                 }
               }
             }
-            if (obj.type === "result" && obj.result) {
-              const text = typeof obj.result === "string"
-                ? obj.result
-                : obj.result.stdout ?? obj.result.output ?? "";
-              if (text) {
-                const preview = text.length > 200
-                  ? text.slice(0, 200) + "..."
-                  : text;
-                Deno.stdout.writeSync(enc.encode(`  → ${preview}\n`));
+            if (obj.type === "user" && obj.message?.content) {
+              for (const block of obj.message.content) {
+                if (
+                  block.type === "tool_result" &&
+                  typeof block.content === "string"
+                ) {
+                  const text = block.content;
+                  const preview = text.length > 300
+                    ? text.slice(0, 300) + "..."
+                    : text;
+                  Deno.stdout.writeSync(enc.encode(`  → ${preview}\n`));
+                }
               }
             }
           } catch { /* skip */ }

@@ -1067,6 +1067,15 @@ export class Db {
     return picked;
   }
 
+  goalAtomCounts(): Map<string, number> {
+    const rows = this.db.prepare(
+      "SELECT goal, count(*) as c FROM atoms WHERE status = 'published' AND goal IS NOT NULL GROUP BY goal",
+    ).all<{ goal: string; c: number }>();
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.goal, r.c);
+    return m;
+  }
+
   updateGoal(
     name: string,
     updates: { weight?: number; body?: string },

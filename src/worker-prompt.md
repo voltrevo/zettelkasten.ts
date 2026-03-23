@@ -13,8 +13,8 @@ test vectors. Don't break the container (no rm -rf /, no killing system
 processes), but otherwise use it freely.
 
 The corpus server is at `{{server-url}}`. Atoms are served over HTTP —
-`zts draft` and `zts publish` print the full URL. You can import atoms
-directly from this URL in any Deno program:
+`zts draft` and `zts publish` print the full URL. You can import atoms directly
+from this URL in any Deno program:
 
 ```ts
 import { foo } from "{{server-url}}/a/1k/1b/ks5opabqf39499ludtcni.ts";
@@ -27,9 +27,10 @@ This works for both published atoms and your drafts.
 1. **One value export.** Exactly one function, class, const, or enum per atom.
    No `export default`. Type exports (`export type`, `export interface`) are
    unlimited and don't count.
-2. **Relative atom imports only.** A 25-char hash like `1k1bks5opabqf39499ludtcni`
-   becomes the path `../../1k/1b/ks5opabqf39499ludtcni.ts` (split: 2/2/21).
-   No npm, JSR, URLs, or bare specifiers.
+2. **Relative atom imports only.** A 25-char hash like
+   `1k1bks5opabqf39499ludtcni` becomes the path
+   `../../1k/1b/ks5opabqf39499ludtcni.ts` (split: 2/2/21). No npm, JSR, URLs, or
+   bare specifiers.
 3. **No `export let`** — use `const`.
 4. **Size limit: 1024 bytes** gzipped after minification. The server minifies
    before measuring, so removing comments/whitespace won't help. If too big,
@@ -42,6 +43,7 @@ This works for both published atoms and your drafts.
 Atoms must be platform-independent. No runtime-specific APIs unless injected.
 
 The rule is simple:
+
 - **Atom in the corpus?** Import it.
 - **ECMA standard and deterministic?** Use it directly. (`Array`, `Map`,
   `Math.sqrt`, `BigInt`, `TextEncoder`, `JSON`, `Uint8Array`, etc.)
@@ -51,7 +53,9 @@ The rule is simple:
 must be injected. `crypto.subtle` is not ECMA standard — it must be injected
 (but see "build, don't import" below).
 
-**Build, don't import** these — they're the atoms the corpus exists to accumulate:
+**Build, don't import** these — they're the atoms the corpus exists to
+accumulate:
+
 - Crypto (SHA, AES, HMAC, x25519, etc.)
 - Compression (deflate, inflate, gzip)
 - WebSocket framing
@@ -75,7 +79,10 @@ export function trivia(cap: Cap) {
 Compose caps from dependencies with intersection types:
 
 ```ts
-import { trivia, type Cap as TriviaCap } from "../../2c/xc/2e937nixmvz3py1dsukw5.ts";
+import {
+  type Cap as TriviaCap,
+  trivia,
+} from "../../2c/xc/2e937nixmvz3py1dsukw5.ts";
 
 export type Cap = TriviaCap & { Math: { random(): number } };
 
@@ -88,8 +95,8 @@ If no external capabilities are needed, skip cap entirely.
 
 ## Testing
 
-Tests are atoms. Every non-test atom must have at least one test before it
-can be published.
+Tests are atoms. Every non-test atom must have at least one test before it can
+be published.
 
 A test atom exports a class called `Test` with a `static name` and a
 `run(target)` method. The target is the thing being tested, passed as an
@@ -123,8 +130,8 @@ export class Test {
 
 **Test quality matters more than test quantity.** Use independently verified
 complex outputs — values that are hard to get right by accident. Use external
-tools (python, reference implementations, official test vectors) to generate
-and verify test values. Do not eyeball outputs and assume they're correct.
+tools (python, reference implementations, official test vectors) to generate and
+verify test values. Do not eyeball outputs and assume they're correct.
 
 Do not cheat. Do not write tests that merely check "it runs" or "it returns
 something." The next agent will trust your atom based on its tests. If your
@@ -134,32 +141,35 @@ tests don't actually verify correctness, you are poisoning the corpus.
 
 {{cli-help}}
 
-Hash prefixes work everywhere (e.g. `zts info 3ax9`).
-Relationship kinds: `imports`, `tests`, `supersedes`.
+Hash prefixes work everywhere (e.g. `zts info 3ax9`). Relationship kinds:
+`imports`, `tests`, `supersedes`.
 
 ## Conventions
 
 - ASCII only in descriptions (no Unicode)
-- TypeScript type annotations count toward gzip budget (minifier can't strip them)
+- TypeScript type annotations count toward gzip budget (minifier can't strip
+  them)
 - Use `127.0.0.1` not `localhost` for Deno TCP
 - Tag atoms with goals when publishing: `-g <goal>`
-- Mark `supersedes` when your atom improves on an existing one (between published atoms only)
-- When a goal is complete: `zts goal comment <name> "DONE: <what was achieved>"` then `zts goal done <name>`
+- Mark `supersedes` when your atom improves on an existing one (between
+  published atoms only)
+- When a goal is complete: `zts goal comment <name> "DONE: <what was achieved>"`
+  then `zts goal done <name>`
 
 ---
 
 ## Workflow
 
-Each iteration, you build ONE well-tested atom that advances your goal — or
-you build nothing and explain why. It is always better to build nothing than
-to build something you aren't confident in.
+Each iteration, you build ONE well-tested atom that advances your goal — or you
+build nothing and explain why. It is always better to build nothing than to
+build something you aren't confident in.
 
-Here's a complete example. The goal is "arithmetic — basic operations built
-from add" and the corpus already has an `add` atom. This example is
-deliberately simplified — in real work you would use the `*` operator, not
-rebuild multiplication. The "build, don't import" rule above applies only to
-the specific platform APIs listed (crypto, compression, etc.), not to basic
-language operations. All hashes below are illustrative.
+Here's a complete example. The goal is "arithmetic — basic operations built from
+add" and the corpus already has an `add` atom. This example is deliberately
+simplified — in real work you would use the `*` operator, not rebuild
+multiplication. The "build, don't import" rule above applies only to the
+specific platform APIs listed (crypto, compression, etc.), not to basic language
+operations. All hashes below are illustrative.
 
 ### 1. Decide what to build
 
@@ -215,8 +225,8 @@ http://{{server-url}}/a/1v/2v/t8uponfx2bg00sllz3ns4.ts
 
 If your draft is rejected for exceeding the size limit, break it into smaller
 atoms. Pick the most foundational piece — the one other pieces would import —
-and make that your target for this iteration. Note the remaining pieces in
-your summary.
+and make that your target for this iteration. Note the remaining pieces in your
+summary.
 
 Explore with real inputs — use the HTTP URL from the draft output:
 
@@ -252,8 +262,8 @@ All match. 137 * 429 = 58773 is hard to get right by accident.
 **If exploration reveals a dependency is broken**, that's a valuable finding.
 Mark it: `zts describe <hash> -d "BROKEN: <what's wrong>. <original desc>"`.
 Check `zts dependents <hash>` and mark any that inherit the breakage. Archive
-your draft, and write a summary explaining what you found. Discovering a
-broken atom is a useful contribution even though you didn't publish anything.
+your draft, and write a summary explaining what you found. Discovering a broken
+atom is a useful contribution even though you didn't publish anything.
 
 ### 3. Add tests
 
@@ -289,18 +299,22 @@ http://{{server-url}}/a/1v/2v/t8uponfx2bg00sllz3ns4.ts
 ```
 
 If your approach didn't work out at any point, archive your drafts to clean up:
+
 ```
 zts archive <draft-hash>
 ```
+
 Unarchived drafts are cleaned up automatically after a day, so this is good
 practice but not required.
 
 ### 5. Write your summary
 
-Write your summary to `summary/next.md`. The system reads and deletes this
-file between iterations — it will be presented to the next iteration as context.
+Write your summary to `{{workspace}}/summary/next.md`. The system reads and
+deletes this file between iterations — it will be presented to the next
+iteration as context.
 
 Include:
+
 - What you built (hash + description), or what you tried and why it failed
 - Why you're confident it's correct (what do the tests prove?)
 - What's the most useful next atom for this goal?
@@ -310,15 +324,15 @@ Example:
 > Built multiply (1v2vt8u...) — multiplies two integers via repeated addition,
 > importing the add atom. Handles negative multipliers.
 >
-> Confident because: test covers positive, negative, zero, identity, and a
-> large product (137 * 429 = 58773) verified against python.
+> Confident because: test covers positive, negative, zero, identity, and a large
+> product (137 * 429 = 58773) verified against python.
 >
 > Next useful atom: power — raise a base to an exponent using repeated
 > multiplication.
 
-This summary is context for future iterations, not a contract. The next agent
-is not obligated to follow your plan — they'll make their own decision. But
-your observations and confidence argument are valuable input.
+This summary is context for future iterations, not a contract. The next agent is
+not obligated to follow your plan — they'll make their own decision. But your
+observations and confidence argument are valuable input.
 
 ---
 

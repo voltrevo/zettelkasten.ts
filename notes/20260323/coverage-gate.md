@@ -24,13 +24,17 @@ This can be returned directly to the agent as the rejection message.
 ## Import rewriting
 
 When the target atom is saved locally, its relative imports break:
+
 ```ts
 import { foo } from "../../ab/cd/efghijklmnopqrstuvw.ts";
 ```
+
 Rewrite to HTTP URLs:
+
 ```ts
 import { foo } from "http://server/a/ab/cd/efghijklmnopqrstuvw.ts";
 ```
+
 Safe because atom imports are constrained to exactly this `../../xx/yy/rest.ts`
 format. Simple regex: `../../` → `${serverUrl}/a/`.
 
@@ -44,11 +48,13 @@ format. Simple regex: `../../` → `${serverUrl}/a/`.
 4. Generates a modified test runner importing target locally
 5. Runs `deno test --coverage=<dir> ...`
 6. Runs `deno coverage <dir> --detailed`, filters to target file
-7. Returns `{ passed, lines: {covered, total}, branches: {covered, total}, uncoveredDetail }`
+7. Returns
+   `{ passed, lines: {covered, total}, branches: {covered, total}, uncoveredDetail }`
 
 ### Server: enforce at publish time
 
 In `POST /publish/<hash>`, after confirming tests exist:
+
 1. Call checker `/check-coverage`
 2. Reject with 422 if coverage below threshold
 3. Include uncovered lines in error so agent sees exactly what to fix
@@ -61,8 +67,8 @@ deps (those were covered at their own publish time).
 
 ### Performance
 
-Coverage only runs at publish time, not on `add-test`. Adds ~50% overhead to
-one test run. Acceptable since publish is infrequent.
+Coverage only runs at publish time, not on `add-test`. Adds ~50% overhead to one
+test run. Acceptable since publish is infrequent.
 
 ### Files to modify
 

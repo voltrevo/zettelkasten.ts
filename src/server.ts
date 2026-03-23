@@ -107,37 +107,6 @@ async function runTests(
   return null;
 }
 
-/** Walk transitive deps of content; return error Response if any lack tests. */
-function checkDepsTested(content: string): Response | null {
-  const visited = new Set<string>();
-  const queue = extractDependencies(content);
-  const untested: string[] = [];
-
-  while (queue.length > 0) {
-    const dep = queue.shift()!;
-    if (visited.has(dep)) continue;
-    visited.add(dep);
-
-    const tests = db.queryRelationships({ to: dep, kind: "tests" });
-    if (tests.length === 0) untested.push(dep);
-
-    // Walk deeper
-    const depSource = db.getSource(dep);
-    if (depSource) {
-      for (const sub of extractDependencies(depSource)) {
-        if (!visited.has(sub)) queue.push(sub);
-      }
-    }
-  }
-
-  if (untested.length > 0) {
-    return new Response(`Untested deps: ${untested.join(", ")}`, {
-      status: 422,
-    });
-  }
-  return null;
-}
-
 // 25 base36 chars = 25 * log2(36) ~ 129.2 bits
 const BASE36_LEN = 25;
 
@@ -364,7 +333,12 @@ async function route(req: Request): Promise<Response> {
     // Collision: already a draft — rerun checks passed above, return hash
     if (existingStatus === "draft") {
       return new Response(
-        JSON.stringify({ hash, url: urlPath, httpUrl: `${serverUrl}${urlPath}`, existing: true }),
+        JSON.stringify({
+          hash,
+          url: urlPath,
+          httpUrl: `${serverUrl}${urlPath}`,
+          existing: true,
+        }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
     }
@@ -380,7 +354,12 @@ async function route(req: Request): Promise<Response> {
     db.insertLog({ op: "atom.draft", subject: hash });
 
     return new Response(
-      JSON.stringify({ hash, url: urlPath, httpUrl: `${serverUrl}${urlPath}`, existing: false }),
+      JSON.stringify({
+        hash,
+        url: urlPath,
+        httpUrl: `${serverUrl}${urlPath}`,
+        existing: false,
+      }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
   }
@@ -465,7 +444,11 @@ async function route(req: Request): Promise<Response> {
       const res = await fetch(`${checkerUrl}/check`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ serverUrl, targetHash: target, testHashes: [hash] }),
+        body: JSON.stringify({
+          serverUrl,
+          targetHash: target,
+          testHashes: [hash],
+        }),
       });
       const result = await res.json() as {
         passed: boolean;
@@ -563,7 +546,9 @@ async function route(req: Request): Promise<Response> {
       );
       if (unpublished.length > 0) {
         return new Response(
-          `Cannot publish: unpublished dependencies: ${unpublished.join(", ")}. Publish them first.`,
+          `Cannot publish: unpublished dependencies: ${
+            unpublished.join(", ")
+          }. Publish them first.`,
           { status: 422 },
         );
       }
@@ -602,7 +587,11 @@ async function route(req: Request): Promise<Response> {
       }
 
       // Publish
-      db.publishAtom(hash, description ?? (isTest ? (extractTestName(atom.source) ?? "") : ""), goal);
+      db.publishAtom(
+        hash,
+        description ?? (isTest ? (extractTestName(atom.source) ?? "") : ""),
+        goal,
+      );
 
       // Generate embedding
       const desc = description ?? extractTestName(atom.source) ?? "";
@@ -655,7 +644,10 @@ async function route(req: Request): Promise<Response> {
       const status = db.getAtomStatus(hash);
       if (!status) return new Response("Not found", { status: 404 });
       if (status === "published") {
-        return new Response("Cannot archive published atoms. Use delete (admin) instead.", { status: 422 });
+        return new Response(
+          "Cannot archive published atoms. Use delete (admin) instead.",
+          { status: 422 },
+        );
       }
 
       // Check nothing non-archived imports this draft
@@ -665,7 +657,9 @@ async function route(req: Request): Promise<Response> {
       );
       if (blockingImporters.length > 0) {
         return new Response(
-          `Cannot archive: imported by ${blockingImporters.map((r) => r.from).join(", ")}`,
+          `Cannot archive: imported by ${
+            blockingImporters.map((r) => r.from).join(", ")
+          }`,
           { status: 422 },
         );
       }
@@ -1464,7 +1458,13 @@ async function route(req: Request): Promise<Response> {
     const done = url.searchParams.get("done") === "1";
     const all = url.searchParams.get("all") === "1";
     const goals = db.listGoals({ done, all });
-    return new Response(JSON.stringify(goals), {
+    // Add atom counts per goal
+    const counts = db.goalAtomCounts();
+    const withCounts = goals.map((g) => ({
+      ...g,
+      atomCount: counts.get(g.name) ?? 0,
+    }));
+    return new Response(JSON.stringify(withCounts), {
       headers: { "content-type": "application/json" },
     });
   }

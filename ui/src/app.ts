@@ -62,13 +62,26 @@ export function shortHash(hash: string): string {
 }
 
 export function relTime(iso: string): string {
-  const d = new Date(iso);
-  const now = Date.now();
-  const diff = Math.floor((now - d.getTime()) / 1000);
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  // Server stores UTC without Z suffix — add it so the browser parses correctly
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diff < 0) return "just now";
+  if (diff < 10) return "just now";
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) {
+    const m = Math.floor(diff / 60);
+    return m === 1 ? "1 min ago" : `${m} min ago`;
+  }
+  if (diff < 86400) {
+    const h = Math.floor(diff / 3600);
+    const m = Math.floor((diff % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m ago` : `${h}h ago`;
+  }
+  if (diff < 604800) {
+    const days = Math.floor(diff / 86400);
+    const h = Math.floor((diff % 86400) / 3600);
+    return h > 0 ? `${days}d ${h}h ago` : `${days}d ago`;
+  }
   return d.toLocaleDateString();
 }
 

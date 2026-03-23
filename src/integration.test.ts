@@ -128,13 +128,13 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(drafts[0].hash, atomHash);
     });
 
-    let addTestHash = "";
+    let _addTestHash = "";
 
     await timed(t, "add test to draft target", async () => {
       const testSource =
         `// Tests that add returns the sum of two numbers\nexport class Test {\n  static name = "add: basic addition";\n  run(target: (a: number, b: number) => number): void {\n    if (target(2, 3) !== 5) throw new Error("expected 5");\n  }\n}\n`;
       const result = await client.addTest(testSource, [atomHash]);
-      addTestHash = result.hash;
+      _addTestHash = result.hash;
       log("addTest result:", {
         hash: result.hash,
         testName: result.testName,
@@ -206,10 +206,17 @@ Deno.test("integration: full workflow", async (t) => {
           `${a.hash.slice(0, 8)}… ${a.description.slice(0, 40)}`
         ),
       );
-      // atomHash + addTestHash (auto-published with target)
+      // atomHash + _addTestHash (auto-published with target)
       assertEquals(atoms.length >= 1, true);
       const hashes = atoms.map((a) => a.hash);
       assertEquals(hashes.includes(atomHash), true);
+    });
+
+    await timed(t, "goal list includes atomCount", async () => {
+      const goals = await client.listGoals();
+      const testGoal = goals.find((g) => g.name === "test-goal");
+      log("test-goal atomCount:", testGoal?.atomCount);
+      assertEquals(testGoal?.atomCount, 1);
     });
 
     await timed(t, "recent filtered by goal", async () => {
@@ -272,7 +279,8 @@ Deno.test("integration: full workflow", async (t) => {
       const draftResult = await client.draft(source);
       atom2Hash = draftResult.hash;
       // Add a simple test
-      const testSrc = `export class Test {\n  static name = "PI is approximately 3.14";\n  run(PI: number): void {\n    if (Math.abs(PI - 3.14159) > 0.001) throw new Error("wrong PI");\n  }\n}\n`;
+      const testSrc =
+        `export class Test {\n  static name = "PI is approximately 3.14";\n  run(PI: number): void {\n    if (Math.abs(PI - 3.14159) > 0.001) throw new Error("wrong PI");\n  }\n}\n`;
       await client.addTest(testSrc, [atom2Hash]);
       await client.publish(atom2Hash, {
         description: "The mathematical constant pi",
@@ -413,10 +421,15 @@ Deno.test("integration: full workflow", async (t) => {
 
     await timed(t, "delete atom", async () => {
       // Remove test relationships first
-      const testRels = await client.queryRelationships({ to: atom2Hash, kind: "tests" });
+      const testRels = await client.queryRelationships({
+        to: atom2Hash,
+        kind: "tests",
+      });
       for (const rel of testRels) {
         await client.removeRelationship(rel.from, "tests", atom2Hash);
-        try { await client.deleteAtom(rel.from); } catch { /* may have other rels */ }
+        try {
+          await client.deleteAtom(rel.from);
+        } catch { /* may have other rels */ }
       }
       await client.deleteAtom(atom2Hash);
       await assertRejects(
@@ -427,7 +440,7 @@ Deno.test("integration: full workflow", async (t) => {
 
     await timed(t, "status reflects changes", async () => {
       const s = await client.getStatus();
-      // atomHash + addTestHash remain (atom2Hash deleted)
+      // atomHash + _addTestHash remain (atom2Hash deleted)
       assertEquals(s.totalAtoms >= 2, true);
     });
 
@@ -482,14 +495,18 @@ Deno.test("integration: full workflow", async (t) => {
 
     // ---- Idempotent draft ----
 
-    await timed(t, "draft of already-published content returns 409", async () => {
-      const source =
-        `// Adds two numbers and returns the sum\nexport function add(a: number, b: number): number { return a + b; }\n`;
-      await assertRejects(
-        () => client.draft(source),
-        ApiError,
-      );
-    });
+    await timed(
+      t,
+      "draft of already-published content returns 409",
+      async () => {
+        const source =
+          `// Adds two numbers and returns the sum\nexport function add(a: number, b: number): number { return a + b; }\n`;
+        await assertRejects(
+          () => client.draft(source),
+          ApiError,
+        );
+      },
+    );
 
     await timed(t, "idempotent draft of same draft content", async () => {
       const source = `// Temp atom\nexport const temp = 42;\n`;
@@ -512,7 +529,8 @@ Deno.test("integration: full workflow", async (t) => {
       const draftResult = await client.draft(source);
       depAtomHash = draftResult.hash;
       // Add a test for the double function
-      const testSrc = `export class Test {\n  static name = "double(5) returns 10";\n  run(double: (n: number) => number): void {\n    if (double(5) !== 10) throw new Error("expected 10");\n  }\n}\n`;
+      const testSrc =
+        `export class Test {\n  static name = "double(5) returns 10";\n  run(double: (n: number) => number): void {\n    if (double(5) !== 10) throw new Error("expected 10");\n  }\n}\n`;
       await client.addTest(testSrc, [depAtomHash]);
       await client.publish(depAtomHash, {
         description: "Doubles a number using add",
@@ -562,10 +580,15 @@ Deno.test("integration: full workflow", async (t) => {
       // Remove import relationship
       await client.removeRelationship(depAtomHash, "imports", atomHash);
       // Remove test relationships
-      const testRels = await client.queryRelationships({ to: depAtomHash, kind: "tests" });
+      const testRels = await client.queryRelationships({
+        to: depAtomHash,
+        kind: "tests",
+      });
       for (const rel of testRels) {
         await client.removeRelationship(rel.from, "tests", depAtomHash);
-        try { await client.deleteAtom(rel.from); } catch { /* may have other rels */ }
+        try {
+          await client.deleteAtom(rel.from);
+        } catch { /* may have other rels */ }
       }
       await client.deleteAtom(depAtomHash);
       await assertRejects(() => client.getAtom(depAtomHash), ApiError);
@@ -850,7 +873,10 @@ Deno.test("integration: full workflow", async (t) => {
         await client.removeRelationship(chainB, "supersedes", chainA);
         // Remove test relationships and test atoms for each chain atom
         for (const hash of [chainC, chainB, chainA]) {
-          const rels = await client.queryRelationships({ to: hash, kind: "tests" });
+          const rels = await client.queryRelationships({
+            to: hash,
+            kind: "tests",
+          });
           for (const rel of rels) {
             await client.removeRelationship(rel.from, "tests", hash);
             try {

@@ -127,10 +127,11 @@ zts publish <hash> -d "brief description" -g <goal>
 ```
 
 The hash is 25 chars. Split into 2/2/21 for the import path inside atoms:
-`hash "1k1bks5opabqf39499ludtcni"` → `import from "../../1k/1b/ks5opabqf39499ludtcni.ts"`
+`hash "1k1bks5opabqf39499ludtcni"` →
+`import from "../../1k/1b/ks5opabqf39499ludtcni.ts"`
 
-Publishing requires all imported atoms to already be published and at least
-one test (test atoms are exempt). Associated test drafts are auto-published.
+Publishing requires all imported atoms to already be published and at least one
+test (test atoms are exempt). Associated test drafts are auto-published.
 Description must be **ASCII only**. Use `zts archive <hash>` to clean up
 abandoned drafts.
 
@@ -248,9 +249,9 @@ Rules:
 
 ## Process for building atom trees
 
-When building a tree of atoms, work bottom-up: find the deepest dependency
-that doesn't exist yet, build and publish that first, then move up. Each atom
-goes through draft → explore → add-test → publish.
+When building a tree of atoms, work bottom-up: find the deepest dependency that
+doesn't exist yet, build and publish that first, then move up. Each atom goes
+through draft → explore → add-test → publish.
 
 Search the corpus before building — many building blocks already exist. Use
 `zts tops <hash>` to find the best current version of any atom found in search.

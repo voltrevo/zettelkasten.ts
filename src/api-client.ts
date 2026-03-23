@@ -385,7 +385,7 @@ function buildClient(
         body: JSON.stringify({ source, targets }),
       }),
 
-    async publish(hash, pubOpts) {
+    publish(hash, pubOpts) {
       const headers: Record<string, string> = {};
       // Base64-encode description to avoid ByteString errors
       headers["x-description"] = btoa(
