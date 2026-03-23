@@ -63,6 +63,7 @@ const args = parseArgs(Deno.args, {
     "done",
     "once",
     "dangerously-skip-permissions",
+    "raw",
     "h",
     "help",
   ],
@@ -287,9 +288,10 @@ zts admin goal delete <name>
   Corpus health summary: total atoms, defects, superseded, recent activity,
   per-goal stats. Default window: last 7 days.`,
 
-  "show-prompt": `zts show-prompt <prompt|retrospective>
-  Print the active agent prompt. Shows DB override if one exists,
-  otherwise the compiled default.`,
+  "show-prompt": `zts show-prompt <prompt|retrospective> [--raw]
+  Print the active agent prompt with templates expanded.
+  --raw    show raw template without expansion
+  Shows DB override if one exists, otherwise the compiled default.`,
 
   worker: `zts worker [run] [flags]     start the agent loop
 zts worker setup [flags]     create workspace for a channel
@@ -1627,9 +1629,9 @@ async function cmdWorker(rest: string[]): Promise<void> {
 
 async function cmdShowPrompt(rest: string[]): Promise<void> {
   const name = rest[0];
-  if (!name || !["context", "iteration", "retrospective"].includes(name)) {
+  if (!name || !["prompt", "retrospective"].includes(name)) {
     console.error(
-      "usage: zts show-prompt <prompt|retrospective>",
+      "usage: zts show-prompt <prompt|retrospective> [--raw]",
     );
     Deno.exit(1);
   }
@@ -1640,7 +1642,22 @@ async function cmdShowPrompt(rest: string[]): Promise<void> {
         `(using override — pass --default to see compiled default)\n`,
       );
     }
-    console.log(result.text);
+    let text = result.text;
+    if (!args.raw) {
+      // Expand static templates
+      const helpProc = new Deno.Command(Deno.execPath(), {
+        args: ["run", "--allow-all", new URL(import.meta.url).pathname, "-h"],
+        stdout: "piped",
+        stderr: "piped",
+      });
+      const helpOutput = await helpProc.output();
+      const cliHelp = new TextDecoder().decode(helpOutput.stderr) +
+        new TextDecoder().decode(helpOutput.stdout);
+      text = text
+        .replace(/\{\{cli-help\}\}/g, cliHelp.trim())
+        .replace(/\{\{server-url\}\}/g, cfg.serverUrl);
+    }
+    console.log(text);
   } catch (e) {
     if (e instanceof ApiError) {
       console.error(`error: ${e.status} ${e.message}`);
