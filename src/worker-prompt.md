@@ -213,6 +213,11 @@ $ zts draft ./tmp/multiply.ts
 http://{{server-url}}/a/1v/2v/t8uponfx2bg00sllz3ns4.ts
 ```
 
+If your draft is rejected for exceeding the size limit, break it into smaller
+atoms. Pick the most foundational piece — the one other pieces would import —
+and make that your target for this iteration. Note the remaining pieces in
+your summary.
+
 Explore with real inputs — use the HTTP URL from the draft output:
 
 ```
