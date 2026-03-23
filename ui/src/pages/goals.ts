@@ -1,5 +1,11 @@
 import { client, h, navigate, registerPage, relTime, shortHash } from "../app";
 import { ApiError } from "@zts/api-client";
+// Lazy-load marked to keep bundle small
+let _marked: typeof import("marked") | null = null;
+async function getMarked() {
+  if (!_marked) _marked = await import("marked");
+  return _marked;
+}
 
 registerPage("goals", async (args: string[]) => {
   // If subpath, show goal detail
@@ -147,33 +153,77 @@ async function goalDetail(name: string): Promise<HTMLElement> {
   weightRow.append(weightInput);
   editSection.append(weightRow);
 
+  // Body: render/edit toggle
   const bodyRow = h("div", { style: "margin-bottom:0.75rem" });
-  bodyRow.append(
+  const bodyHeader = h("div", {
+    style:
+      "display:flex;align-items:center;gap:0.5rem;margin-bottom:0.375rem",
+  });
+  bodyHeader.append(
     h("label", {
-      style:
-        "display:block;font-size:0.8rem;color:var(--text-2);margin-bottom:0.375rem",
+      style: "font-size:0.8rem;color:var(--text-2)",
     }, "Body"),
   );
+  let editing = false;
+  const toggleBtn = h("button", {
+    class: "btn btn-sm btn-ghost",
+    style: "font-size:0.75rem;padding:0.1rem 0.5rem",
+  }, "Edit");
+  bodyHeader.append(toggleBtn);
+  bodyRow.append(bodyHeader);
+
+  const rendered = h("div", {
+    class: "markdown-body",
+    style: "font-size:0.875rem;line-height:1.5",
+  });
+  rendered.innerHTML = (await getMarked()).marked.parse(goal.body ?? "", { async: false }) as string;
+
   const bodyInput = h("textarea", {
     style:
-      "width:100%;min-height:6rem;font-family:var(--mono);font-size:0.8rem",
-    placeholder: "Goal description...",
+      "width:100%;min-height:12rem;font-family:var(--mono);font-size:0.8rem;display:none",
+    placeholder: "Goal description (markdown)...",
   }) as HTMLTextAreaElement;
   bodyInput.value = goal.body ?? "";
-  bodyRow.append(bodyInput);
-  editSection.append(bodyRow);
 
   const editActions = h("div", {
-    style: "display:flex;gap:0.5rem;align-items:center",
+    style: "display:none;gap:0.5rem;align-items:center;margin-top:0.5rem",
   });
   const saveBtn = h("button", { class: "btn btn-sm btn-primary" }, "Save");
   const editStatus = h("span", { style: "font-size:0.8rem" });
+
+  toggleBtn.addEventListener("click", async () => {
+    editing = !editing;
+    if (editing) {
+      rendered.style.display = "none";
+      bodyInput.style.display = "";
+      editActions.style.display = "flex";
+      toggleBtn.textContent = "Preview";
+      bodyInput.focus();
+    } else {
+      rendered.innerHTML = (await getMarked()).marked.parse(bodyInput.value, {
+        async: false,
+      }) as string;
+      rendered.style.display = "";
+      bodyInput.style.display = "none";
+      editActions.style.display = "none";
+      toggleBtn.textContent = "Edit";
+    }
+  });
+
   saveBtn.addEventListener("click", async () => {
     try {
       await client.updateGoal(name, {
         weight: parseInt(weightInput.value, 10) || 1,
         body: bodyInput.value,
       });
+      rendered.innerHTML = (await getMarked()).marked.parse(bodyInput.value, {
+        async: false,
+      }) as string;
+      editing = false;
+      rendered.style.display = "";
+      bodyInput.style.display = "none";
+      editActions.style.display = "none";
+      toggleBtn.textContent = "Edit";
       editStatus.textContent = "Saved";
       editStatus.style.color = "var(--green)";
       setTimeout(() => editStatus.textContent = "", 2000);
@@ -187,7 +237,35 @@ async function goalDetail(name: string): Promise<HTMLElement> {
     }
   });
   editActions.append(saveBtn, editStatus);
-  editSection.append(editActions);
+
+  bodyRow.append(rendered, bodyInput, editActions);
+  editSection.append(bodyRow);
+
+  // Weight save (separate from body)
+  const weightActions = h("div", {
+    style: "display:flex;gap:0.5rem;align-items:center",
+  });
+  const weightSaveBtn = h(
+    "button",
+    { class: "btn btn-sm btn-ghost" },
+    "Update Weight",
+  );
+  const weightStatus = h("span", { style: "font-size:0.8rem" });
+  weightSaveBtn.addEventListener("click", async () => {
+    try {
+      await client.updateGoal(name, {
+        weight: parseInt(weightInput.value, 10) || 1,
+      });
+      weightStatus.textContent = "Saved";
+      weightStatus.style.color = "var(--green)";
+      setTimeout(() => weightStatus.textContent = "", 2000);
+    } catch (e) {
+      weightStatus.textContent = (e as Error).message;
+      weightStatus.style.color = "var(--red)";
+    }
+  });
+  weightActions.append(weightSaveBtn, weightStatus);
+  editSection.append(weightActions);
   root.append(editSection);
 
   // Actions
