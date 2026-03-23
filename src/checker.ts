@@ -58,7 +58,7 @@ async function handleCheck(req: Request): Promise<Response> {
   const serverHost = new URL(body.serverUrl).host;
   const start = performance.now();
 
-  const proc = new Deno.Command(Deno.execPath(), {
+  const child = new Deno.Command(Deno.execPath(), {
     args: [
       "test",
       `--allow-import=${serverHost}`,
@@ -72,9 +72,9 @@ async function handleCheck(req: Request): Promise<Response> {
     ],
     stdout: "piped",
     stderr: "piped",
-  });
+  }).spawn();
 
-  let output: Deno.CommandOutput;
+  let output: { code: number; stdout: Uint8Array; stderr: Uint8Array };
   try {
     let timer: ReturnType<typeof setTimeout>;
     const timeout = new Promise<never>((_, reject) => {
@@ -84,9 +84,17 @@ async function handleCheck(req: Request): Promise<Response> {
       );
     });
     try {
-      output = await Promise.race([proc.output(), timeout]);
-    } finally {
+      const status = await Promise.race([child.status, timeout]);
       clearTimeout(timer!);
+      const [stdout, stderr] = await Promise.all([
+        new Response(child.stdout).arrayBuffer().then((b) => new Uint8Array(b)),
+        new Response(child.stderr).arrayBuffer().then((b) => new Uint8Array(b)),
+      ]);
+      output = { code: status.code, stdout, stderr };
+    } catch (e) {
+      clearTimeout(timer!);
+      try { child.kill(); } catch { /* already dead */ }
+      throw e;
     }
   } catch (e) {
     const durationMs = Math.round(performance.now() - start);

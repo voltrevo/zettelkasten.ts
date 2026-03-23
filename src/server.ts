@@ -364,7 +364,7 @@ async function route(req: Request): Promise<Response> {
     // Collision: already a draft — rerun checks passed above, return hash
     if (existingStatus === "draft") {
       return new Response(
-        JSON.stringify({ hash, url: urlPath, existing: true }),
+        JSON.stringify({ hash, url: urlPath, httpUrl: `${serverUrl}${urlPath}`, existing: true }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
     }
@@ -380,7 +380,7 @@ async function route(req: Request): Promise<Response> {
     db.insertLog({ op: "atom.draft", subject: hash });
 
     return new Response(
-      JSON.stringify({ hash, url: urlPath, existing: false }),
+      JSON.stringify({ hash, url: urlPath, httpUrl: `${serverUrl}${urlPath}`, existing: false }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
   }
@@ -633,6 +633,7 @@ async function route(req: Request): Promise<Response> {
         JSON.stringify({
           hash,
           url: hashToUrlPath(hash),
+          httpUrl: `${serverUrl}${hashToUrlPath(hash)}`,
           autoPublished,
         }),
         { status: 200, headers: { "content-type": "application/json" } },

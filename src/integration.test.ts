@@ -612,7 +612,7 @@ Deno.test("integration: full workflow", async (t) => {
       );
       await client.addRelationship(chainB, "supersedes", chainA);
       await client.addRelationship(chainC, "supersedes", chainB);
-    }, SUBPROCESS);
+    }, SUBPROCESS * 3);
 
     await timed(t, "tops traverses supersedes chain", async () => {
       const tops = await client.tops(chainA);

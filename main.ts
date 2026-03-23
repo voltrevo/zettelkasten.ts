@@ -873,6 +873,7 @@ async function cmdDraft(rest: string[]): Promise<void> {
   try {
     const result = await client.draft(content);
     console.log(result.hash);
+    console.log(result.httpUrl);
     if (result.existing) console.error("(existing draft)");
   } catch (e) {
     if (e instanceof ApiError) {
@@ -923,6 +924,7 @@ async function cmdPublish(rest: string[]): Promise<void> {
       goal: args.g || undefined,
     });
     console.log(result.hash);
+    console.log(result.httpUrl);
     if (result.autoPublished.length > 0) {
       console.log(
         `  auto-published ${result.autoPublished.length} test(s)`,

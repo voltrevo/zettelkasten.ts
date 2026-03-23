@@ -92,6 +92,11 @@
     }
   },
   "remote": {
+    "http://localhost:7493/a/19/ru/aodsjv64fzvr379p9brd6.ts": "aa91a10cac5f2562061192ab0b75fc1fa17f638dce8f79b4061c55e3c3d16b8a",
+    "http://localhost:7493/a/1v/2v/t8uponfx2bg00sllz3ns4.ts": "130c994d470e339cf4e6a2c5f1c24511e15b5f5ef6fa0847768725e42af5ed48",
+    "http://localhost:7493/a/25/16/nrbjs4govomp1t7dnsv8r.ts": "73da1699dc3a67b12da4a2689525ebbb4dce5380c4d80aeba46ccb1b9c4c8838",
+    "http://localhost:7493/a/2m/74/gz0fta8q91vhhmt9fixg9.ts": "0249c57304eb9d79c48bc3a3f9f6ba7ce622239edffedda86c2db0d66aedcd02",
+    "http://localhost:7493/a/2y/4i/2ujf0m4u1sow4qyoh68ir.ts": "a4fe0e216be8525d1e7a4b0deed56c0ff1115f0841eb7c0d275a748c055460e5",
     "http://localhost:8000/a/16/nx/lrsloi7pxpvco0hwvfm51.ts": "809e8e3295eda9f1071d218f76060955a21a773b8e47705d8a3c409bd686aaf5",
     "http://localhost:8000/a/2a/om/qq3jom2f1eqm8jpsq8mro.ts": "a661959771edff71c4769da4e36b71a56b497630d831fd04c8296ec2121f79c6",
     "http://localhost:8000/a/2n/i4/e7nhujs522iwzs4tb3gqt.ts": "555c8901d7f7e6b307f73b082b757ba270746c0979ed48f7e62aa6f991e57f2a",

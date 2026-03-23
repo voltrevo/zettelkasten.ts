@@ -110,32 +110,32 @@ Relationship kinds: `imports`, `tests`, `supersedes`.
 
 ## CLI workflow for adding atoms
 
-```sh
-# Write atom to a temp file, then post:
-zts post -d "brief description" -t "<test1>,<test2>" /tmp/myatom.ts
-# → 201 if tests pass (relationships auto-registered), 422 if tests fail
+Atoms go through a draft → test → publish lifecycle:
 
-# The hash is 25 chars. Split into 2/2/21 for the import path:
-# hash "1k1bks5opabqf39499ludtcni" → import from "../../1k/1b/ks5opabqf39499ludtcni.ts"
-import { myFn } from "../../1k/1b/ks5opabqf39499ludtcni.ts";
+```sh
+# 1. Draft: upload atom, get hash + HTTP URL
+zts draft /tmp/myatom.ts
+
+# 2. Explore: import the draft via HTTP URL in any Deno program
+deno run -A /tmp/explore.ts
+
+# 3. Add tests: each test runs immediately against the target
+zts add-test /tmp/test.ts --targets <draft-hash>
+
+# 4. Publish: promote draft to permanent atom
+zts publish <hash> -d "brief description" -g <goal>
 ```
 
-Descriptions are required (`-d`). Use `--no-description` to opt out.
+The hash is 25 chars. Split into 2/2/21 for the import path inside atoms:
+`hash "1k1bks5opabqf39499ludtcni"` → `import from "../../1k/1b/ks5opabqf39499ludtcni.ts"`
 
-One testing mode is required on every post:
-
-- **`-t <hashes>`** — run these tests, verify deps are tested. The standard
-  path.
-- **`--is-test`** — for test atoms. Validates the atom exports `class Test`,
-  checks deps are tested, but doesn't require tests-of-tests.
-- **`--no-tests`** — skip all testing. Use only as a last resort — untested
-  atoms block downstream `-t` posts (the dep check walks the full import tree).
-
-Description must be **ASCII only** — Unicode characters cause a ByteString error
-in the HTTP header.
+Publishing requires all imported atoms to already be published and at least
+one test (test atoms are exempt). Associated test drafts are auto-published.
+Description must be **ASCII only**. Use `zts archive <hash>` to clean up
+abandoned drafts.
 
 The server validates atoms before storing (export count, import paths, size
-limit after minification). Just post and let the server reject — don't try to
+limit after minification). Just draft and let the server reject — don't try to
 pre-check size yourself. Write clean, readable code; the server minifies before
 the size check so manual minification gains nothing and hurts readability. Never
 remove comments, shorten names, or compress formatting to meet the size limit —
@@ -246,46 +246,21 @@ Rules:
 - No constructor arguments — the test creates its own mocks internally
 - No real I/O; the test subprocess runs with `--allow-import=<server>` only
 
-## TDD process for building atom trees
+## Process for building atom trees
 
-Use this process when building a tree of atoms with test coverage:
+When building a tree of atoms, work bottom-up: find the deepest dependency
+that doesn't exist yet, build and publish that first, then move up. Each atom
+goes through draft → explore → add-test → publish.
 
-```
-NEEDS="/tmp/name-$(date +%s)-needs.txt"
-echo "<top-level goal>" > "$NEEDS"
-
-loop:
-  CURRENT=$(tail -1 "$NEEDS")
-
-  # --- first visit: design and draft ---
-  If this is a new need (no draft yet):
-    1. Design the atom's interface (what it exports, what deps it needs)
-    2. Write the full description first — what it computes, inputs/outputs, edge cases
-    3. Search on that description: zts search "<your full description>"
-       If a usable match exists, reuse it. If not, you already have the -d text.
-    4. Write test atoms FIRST — post them normally (tests don't import target)
-    5. Write the implementation atom (save draft to /tmp/)
-    6. If some deps are hypothetical:
-       - Append missing dep names to $NEEDS
-       - Continue loop (picks up deepest need next via tail -1)
-
-  # --- deps satisfied: post and finish ---
-  Post with test gate: zts post -d "desc" -t "<test1>,<test2>" /tmp/draft.ts
-  - On 201: pop $CURRENT from needs file
-  - On 422: fix atom, retry
-
-  Cleanup: if a test is bad, zts delete <test-hash>
-  (409 means it's in use — just leave it)
-```
+Search the corpus before building — many building blocks already exist. Use
+`zts tops <hash>` to find the best current version of any atom found in search.
 
 Key properties:
 
-- **Stack-driven**: `tail -1` = depth-first, naturally reaches leaves first
+- **Bottom-up**: build leaves before parents — publish dependencies first
 - **Description-first**: write description before code, search on it to find
   reusable atoms
-- **Tests before code**: test atoms don't import the target, so they can exist
-  before it does
-- **Atomic quality gate**: conditional post = atom only enters corpus if tests
-  pass; relationships auto-registered on success
-- **Self-healing**: bad tests get cleaned up; failed posts don't pollute the
-  corpus
+- **Explore before testing**: draft the atom, run it interactively, verify
+  outputs against external tools, then formalize into test atoms
+- **Quality gate**: publish requires tests to pass and all deps to be published
+- **Self-healing**: archive bad drafts; stale drafts auto-cleaned after a day

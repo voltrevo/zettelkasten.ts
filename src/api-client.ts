@@ -148,6 +148,7 @@ export interface GoalComment {
 export interface DraftResult {
   hash: string;
   url: string;
+  httpUrl: string;
   existing: boolean;
 }
 
@@ -160,6 +161,7 @@ export interface AddTestResult {
 export interface PublishResult {
   hash: string;
   url: string;
+  httpUrl: string;
   autoPublished: string[];
 }
 
