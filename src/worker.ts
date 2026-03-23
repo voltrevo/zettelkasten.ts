@@ -225,6 +225,19 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       const isRetrospective = iter > 0 && iter % RETROSPECTIVE_INTERVAL === 0;
       const mode = isRetrospective ? "retrospective" : "build";
 
+      // Reset terminal state before each iteration
+      Deno.stdout.writeSync(new TextEncoder().encode(
+        "\x1b[0m" +        // reset SGR (bold, color, etc.)
+        "\x1b[?25h" +      // show cursor
+        "\x1b[?7h" +       // re-enable line wrap
+        "\x1b[?1000l" +    // disable mouse reporting
+        "\x1b[?2004l" +    // disable bracketed paste
+        "\x1b(B",          // reset character set to ASCII
+      ));
+      // Reset terminal attributes (echo, raw mode, etc.)
+      try {
+        await new Deno.Command("stty", { args: ["sane"], stdin: "inherit" }).output();
+      } catch { /* not a TTY or stty unavailable */ }
       console.log(`[iter ${iter}] ${mode}`);
 
       // Fetch prompt
