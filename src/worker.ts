@@ -306,8 +306,6 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       const iterLogDir = `${dir}/logs/iter-${String(iter).padStart(4, "0")}`;
       await Deno.mkdir(iterLogDir, { recursive: true });
 
-      // Save the assembled prompt
-      await Deno.writeTextFile(`${iterLogDir}/prompt.md`, prompt);
 
       // Build claude args
       const claudeArgs: string[] = [];
@@ -322,6 +320,9 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       if (config.model) {
         claudeArgs.push("--model", config.model);
       }
+      // Write prompt to file to avoid E2BIG on large retrospective prompts
+      await Deno.writeTextFile(`${iterLogDir}/prompt.md`, prompt);
+
       claudeArgs.push(
         "--max-turns",
         String(config.maxTurns),
@@ -329,7 +330,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         "stream-json",
         "--verbose",
         "-p",
-        prompt,
+        `Follow the instructions in ${iterLogDir}/prompt.md`,
       );
 
       // Spawn agent — always capture stream-json, show parsed output
