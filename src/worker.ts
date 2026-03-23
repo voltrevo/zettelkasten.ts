@@ -376,10 +376,40 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                   Deno.stdout.writeSync(enc.encode(block.text + "\n"));
                 }
                 if (block.type === "tool_use") {
-                  Deno.stdout.writeSync(
-                    enc.encode(`[tool: ${block.name}]\n`),
-                  );
+                  const input = block.input ?? {};
+                  if (block.name === "Bash" && input.command) {
+                    Deno.stdout.writeSync(
+                      enc.encode(`[$ ${input.command}]\n`),
+                    );
+                  } else if (block.name === "Write" && input.file_path) {
+                    Deno.stdout.writeSync(
+                      enc.encode(`[write: ${input.file_path}]\n`),
+                    );
+                  } else if (block.name === "Read" && input.file_path) {
+                    Deno.stdout.writeSync(
+                      enc.encode(`[read: ${input.file_path}]\n`),
+                    );
+                  } else if (block.name === "Edit" && input.file_path) {
+                    Deno.stdout.writeSync(
+                      enc.encode(`[edit: ${input.file_path}]\n`),
+                    );
+                  } else {
+                    Deno.stdout.writeSync(
+                      enc.encode(`[tool: ${block.name}]\n`),
+                    );
+                  }
                 }
+              }
+            }
+            if (obj.type === "result" && obj.result) {
+              const text = typeof obj.result === "string"
+                ? obj.result
+                : obj.result.stdout ?? obj.result.output ?? "";
+              if (text) {
+                const preview = text.length > 200
+                  ? text.slice(0, 200) + "..."
+                  : text;
+                Deno.stdout.writeSync(enc.encode(`  → ${preview}\n`));
               }
             }
           } catch { /* skip */ }

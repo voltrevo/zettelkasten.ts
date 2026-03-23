@@ -16,15 +16,20 @@ if [ ! -f "$CONFIG" ]; then
   cat > "$CONFIG" <<CONF
 {
   serverUrl: "http://zts-server:7483",
+  serverPort: 7483,
+  checkerPort: 7484,
+  checkerUrl: "http://zts-checker:7484",
   devToken: "${ZTS_DEV_TOKEN}",
+  embedUrl: "http://ollama:11434/api/embeddings",
+  embedModel: "nomic-embed-text",
+  embedDim: 768,
 }
 CONF
-  chmod 600 "$CONFIG"
   echo "Generated agent config at $CONFIG"
 fi
 
-# Ensure permissions are correct (volume may have reset them)
-chmod 600 "$CONFIG" 2>/dev/null || true
+# Lock config read-only so agent can't accidentally overwrite via zts init
+chmod 400 "$CONFIG" 2>/dev/null || true
 
 # Fix workspace volume ownership
 sudo chown -R zts:zts /home/zts/workspaces 2>/dev/null || true
