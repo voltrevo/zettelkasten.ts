@@ -207,6 +207,18 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(src.includes("export function add"), true);
     });
 
+    await timed(t, "draft applies deno fmt to stored source", async () => {
+      // Slightly ugly but under the 10% minification threshold
+      const ugly =
+        `// fmt test atom\nexport function fmtTest(a: number,b: number): number {\nreturn a+b;\n}\n`;
+      const result = await client.draft(ugly);
+      const stored = await client.getAtom(result.hash);
+      // deno fmt adds space after comma and around +
+      assertEquals(stored.includes("a: number, b: number"), true);
+      assertEquals(stored.includes("return a + b"), true);
+      await client.archive(result.hash);
+    }, SUBPROCESS);
+
     await timed(t, "atom info", async () => {
       const info = await client.info(atomHash);
       log("info:", {

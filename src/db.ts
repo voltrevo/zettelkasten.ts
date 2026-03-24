@@ -101,7 +101,9 @@ BEGIN
   INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
 END;
 
-CREATE TRIGGER IF NOT EXISTS atoms_fts_delete AFTER DELETE ON atoms BEGIN
+CREATE TRIGGER IF NOT EXISTS atoms_fts_delete AFTER DELETE ON atoms
+WHEN OLD.status = 'published'
+BEGIN
   INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
 END;
 
@@ -256,7 +258,9 @@ export class Db {
         CREATE TRIGGER atoms_fts_insert AFTER INSERT ON atoms BEGIN
           INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
         END;
-        CREATE TRIGGER atoms_fts_delete AFTER DELETE ON atoms BEGIN
+        CREATE TRIGGER atoms_fts_delete AFTER DELETE ON atoms
+        WHEN OLD.status = 'published'
+        BEGIN
           INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
         END;
       `);
@@ -304,7 +308,9 @@ export class Db {
         BEGIN
           INSERT INTO atoms_fts(rowid, hash, source) VALUES (NEW.rowid, NEW.hash, NEW.source);
         END;
-        CREATE TRIGGER atoms_fts_delete AFTER DELETE ON atoms BEGIN
+        CREATE TRIGGER atoms_fts_delete AFTER DELETE ON atoms
+        WHEN OLD.status = 'published'
+        BEGIN
           INSERT INTO atoms_fts(atoms_fts, rowid, hash, source) VALUES ('delete', OLD.rowid, OLD.hash, OLD.source);
         END;
         CREATE TRIGGER atoms_fts_publish AFTER UPDATE OF status ON atoms

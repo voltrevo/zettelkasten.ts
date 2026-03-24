@@ -290,7 +290,7 @@ async function route(req: Request): Promise<Response> {
   if (req.method === "POST" && path === "/draft") {
     const authErr = requireAuth(req, "dev");
     if (authErr) return authErr;
-    const content = await req.text();
+    let content = await req.text();
     if (!content) {
       return new Response("Empty content", { status: 400 });
     }
@@ -300,34 +300,35 @@ async function route(req: Request): Promise<Response> {
       return new Response(validationError.message, { status: 422 });
     }
 
-    // Minification check: compare char count before/after deno fmt
-    if (!url.searchParams.has("readable")) {
-      const tmp = await Deno.makeTempFile({ suffix: ".ts" });
-      try {
-        await Deno.writeTextFile(tmp, content);
-        const fmt = new Deno.Command(Deno.execPath(), {
-          args: ["fmt", tmp],
-          stdout: "null",
-          stderr: "null",
-        });
-        const fmtResult = await fmt.output();
-        if (fmtResult.success) {
-          const formatted = await Deno.readTextFile(tmp);
-          const origLen = content.length;
-          const fmtLen = formatted.length;
-          if (fmtLen > origLen && (fmtLen - origLen) / origLen > 0.1) {
-            return new Response(
-              "Code appears minified. Minification does not help " +
-                "meet the size constraint — the server minifies " +
-                "before measuring. Write readable code with " +
-                "descriptive variable names and proper formatting.",
-              { status: 422 },
-            );
-          }
+    // Format with deno fmt (via checker service) and check for minification
+    try {
+      const fmtRes = await fetch(`${checkerUrl}/fmt`, {
+        method: "POST",
+        body: content,
+      });
+      const fmt = await fmtRes.json() as {
+        formatted: string;
+        changed: boolean;
+      };
+      if (fmt.changed && !url.searchParams.has("readable")) {
+        const origLen = content.length;
+        const fmtLen = fmt.formatted.length;
+        if (fmtLen > origLen && (fmtLen - origLen) / origLen > 0.1) {
+          return new Response(
+            "Code appears minified. Minification does not help " +
+              "meet the size constraint — the server minifies " +
+              "before measuring. Write readable code with " +
+              "descriptive variable names and proper formatting.",
+            { status: 422 },
+          );
         }
-      } finally {
-        await Deno.remove(tmp).catch(() => {});
       }
+      content = fmt.formatted;
+    } catch (e) {
+      return new Response(
+        `Format check failed: checker unreachable (${(e as Error).message})`,
+        { status: 503 },
+      );
     }
 
     // Lint check via checker service

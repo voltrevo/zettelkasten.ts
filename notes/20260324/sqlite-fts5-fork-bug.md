@@ -10,7 +10,8 @@ Anonymous posting is allowed. Alternatively, email drh@sqlite.org directly.
 
 ---
 
-**Subject: FTS5 "database disk image is malformed" after fork()+exec() — minimal C repro**
+**Subject: FTS5 "database disk image is malformed" after fork()+exec() — minimal
+C repro**
 
 FTS5 content-sync delete triggers return SQLITE_CORRUPT (rc=11, "database disk
 image is malformed") after the process calls fork()+exec()+waitpid(), even
@@ -97,17 +98,17 @@ db.execute("DELETE FROM docs WHERE id = 1")  # raises: database disk image is ma
 
 ### What I've tested
 
-| Condition | Result |
-|-----------|--------|
-| FTS5 delete trigger + fork | **CORRUPT** |
-| FTS5 delete trigger, no fork | OK |
-| Regular tables + fork | OK |
-| FTS5 INSERT trigger + fork | OK |
-| FTS5 MATCH query + fork | OK |
-| :memory: database | **CORRUPT** |
-| File-backed database | **CORRUPT** |
+| Condition                                             | Result      |
+| ----------------------------------------------------- | ----------- |
+| FTS5 delete trigger + fork                            | **CORRUPT** |
+| FTS5 delete trigger, no fork                          | OK          |
+| Regular tables + fork                                 | OK          |
+| FTS5 INSERT trigger + fork                            | OK          |
+| FTS5 MATCH query + fork                               | OK          |
+| :memory: database                                     | **CORRUPT** |
+| File-backed database                                  | **CORRUPT** |
 | Child calls exec() immediately (never touches SQLite) | **CORRUPT** |
-| SQLite 3.51.3, 3.46.0, 3.45.1 | **CORRUPT** |
+| SQLite 3.51.3, 3.46.0, 3.45.1                         | **CORRUPT** |
 
 ### Notes
 

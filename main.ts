@@ -351,7 +351,7 @@ const SERVER_DEF: ServiceDef = {
   command: "server run",
   logFile: SERVER_LOG,
   perms:
-    "--allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-import --allow-run",
+    "--allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-import",
 };
 
 const CHECKER_DEF: ServiceDef = {

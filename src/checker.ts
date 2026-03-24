@@ -158,6 +158,41 @@ async function handleLint(req: Request): Promise<Response> {
   }
 }
 
+async function handleFmt(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+  const source = await req.text();
+  if (!source) {
+    return new Response("Empty source", { status: 400 });
+  }
+
+  const tmpFile = await Deno.makeTempFile({ suffix: ".ts" });
+  try {
+    await Deno.writeTextFile(tmpFile, source);
+    const proc = new Deno.Command(Deno.execPath(), {
+      args: ["fmt", tmpFile],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const output = await proc.output();
+    if (!output.success) {
+      return new Response(
+        JSON.stringify({ formatted: source, changed: false }),
+        { headers: { "content-type": "application/json" } },
+      );
+    }
+    const formatted = await Deno.readTextFile(tmpFile);
+    return new Response(
+      JSON.stringify({ formatted, changed: formatted !== source }),
+      { headers: { "content-type": "application/json" } },
+    );
+  } finally {
+    await Deno.remove(tmpFile).catch(() => {});
+  }
+}
+
 async function handleValidateTest(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
@@ -196,6 +231,9 @@ function handler(req: Request): Promise<Response> | Response {
   }
   if (url.pathname === "/validate-test") {
     return handleValidateTest(req);
+  }
+  if (url.pathname === "/fmt") {
+    return handleFmt(req);
   }
   return new Response("Not found", { status: 404 });
 }
