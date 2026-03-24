@@ -315,9 +315,9 @@ $ zts relate 1v2vt8u supersedes qcoe6p
 ```
 
 This is how the corpus tracks which atom is the best version of an idea.
-`zts tops <hash>` walks the supersedes chain to find the current best.
-Always check `zts search` / `zts tops` before building — if a working version
-exists, build on it or supersede it rather than starting from scratch.
+`zts tops <hash>` walks the supersedes chain to find the current best. Always
+check `zts search` / `zts tops` before building — if a working version exists,
+build on it or supersede it rather than starting from scratch.
 
 If your approach didn't work out at any point, archive your drafts to clean up:
 

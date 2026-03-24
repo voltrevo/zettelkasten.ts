@@ -648,12 +648,25 @@ textarea {
   margin-bottom: 0.5rem;
   font-family: var(--mono);
 }
-.markdown-body h1 { font-size: 1.1rem; }
-.markdown-body h2 { font-size: 1rem; }
-.markdown-body h3 { font-size: 0.9rem; }
-.markdown-body p { margin-bottom: 0.5rem; }
-.markdown-body ul, .markdown-body ol { margin: 0.5rem 0; padding-left: 1.5rem; }
-.markdown-body li { margin-bottom: 0.25rem; }
+.markdown-body h1 {
+  font-size: 1.1rem;
+}
+.markdown-body h2 {
+  font-size: 1rem;
+}
+.markdown-body h3 {
+  font-size: 0.9rem;
+}
+.markdown-body p {
+  margin-bottom: 0.5rem;
+}
+.markdown-body ul, .markdown-body ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+.markdown-body li {
+  margin-bottom: 0.25rem;
+}
 .markdown-body code {
   background: var(--bg-2);
   padding: 0.1rem 0.3rem;
@@ -681,12 +694,18 @@ textarea {
   border: 1px solid var(--border);
   padding: 0.3rem 0.5rem;
 }
-.markdown-body th { background: var(--bg-2); }
+.markdown-body th {
+  background: var(--bg-2);
+}
 .markdown-body blockquote {
   border-left: 3px solid var(--border);
   padding-left: 0.75rem;
   color: var(--text-2);
   margin: 0.5rem 0;
 }
-.markdown-body strong { font-weight: 600; }
-.markdown-body a { color: var(--blue); }
+.markdown-body strong {
+  font-weight: 600;
+}
+.markdown-body a {
+  color: var(--blue);
+}

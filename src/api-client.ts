@@ -195,7 +195,7 @@ export class ApiError extends Error {
 export interface ZtsClient {
   // Atoms
   getAtom(hash: string): Promise<string>;
-  draft(source: string): Promise<DraftResult>;
+  draft(source: string, opts?: { readable?: boolean }): Promise<DraftResult>;
   addTest(
     source: string,
     targets: string[],
@@ -372,8 +372,8 @@ function buildClient(
       return info.source;
     },
 
-    draft: (source) =>
-      json("/draft", {
+    draft: (source, opts) =>
+      json(opts?.readable ? "/draft?readable=1" : "/draft", {
         method: "POST",
         body: source,
       }),

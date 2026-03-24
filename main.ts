@@ -64,6 +64,7 @@ const args = parseArgs(Deno.args, {
     "once",
     "dangerously-skip-permissions",
     "raw",
+    "this-code-is-readable",
     "h",
     "help",
   ],
@@ -350,7 +351,7 @@ const SERVER_DEF: ServiceDef = {
   command: "server run",
   logFile: SERVER_LOG,
   perms:
-    "--allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-import",
+    "--allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-import --allow-run",
 };
 
 const CHECKER_DEF: ServiceDef = {
@@ -868,13 +869,14 @@ async function cmdGet(rest: string[]): Promise<void> {
 
 async function cmdDraft(rest: string[]): Promise<void> {
   const file = rest[0];
+  const readable = !!args["this-code-is-readable"];
   if (!file) {
     console.error("usage: zts draft <file>");
     Deno.exit(1);
   }
   const content = await Deno.readTextFile(file);
   try {
-    const result = await client.draft(content);
+    const result = await client.draft(content, { readable });
     console.log(result.hash);
     console.log(result.httpUrl);
     if (result.existing) console.error("(existing draft)");

@@ -156,8 +156,7 @@ async function goalDetail(name: string): Promise<HTMLElement> {
   // Body: render/edit toggle
   const bodyRow = h("div", { style: "margin-bottom:0.75rem" });
   const bodyHeader = h("div", {
-    style:
-      "display:flex;align-items:center;gap:0.5rem;margin-bottom:0.375rem",
+    style: "display:flex;align-items:center;gap:0.5rem;margin-bottom:0.375rem",
   });
   bodyHeader.append(
     h("label", {
@@ -176,7 +175,9 @@ async function goalDetail(name: string): Promise<HTMLElement> {
     class: "markdown-body",
     style: "font-size:0.875rem;line-height:1.5",
   });
-  rendered.innerHTML = (await getMarked()).marked.parse(goal.body ?? "", { async: false }) as string;
+  rendered.innerHTML = (await getMarked()).marked.parse(goal.body ?? "", {
+    async: false,
+  }) as string;
 
   const bodyInput = h("textarea", {
     style:

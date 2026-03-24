@@ -300,6 +300,36 @@ async function route(req: Request): Promise<Response> {
       return new Response(validationError.message, { status: 422 });
     }
 
+    // Minification check: compare char count before/after deno fmt
+    if (!url.searchParams.has("readable")) {
+      const tmp = await Deno.makeTempFile({ suffix: ".ts" });
+      try {
+        await Deno.writeTextFile(tmp, content);
+        const fmt = new Deno.Command(Deno.execPath(), {
+          args: ["fmt", tmp],
+          stdout: "null",
+          stderr: "null",
+        });
+        const fmtResult = await fmt.output();
+        if (fmtResult.success) {
+          const formatted = await Deno.readTextFile(tmp);
+          const origLen = content.length;
+          const fmtLen = formatted.length;
+          if (fmtLen > origLen && (fmtLen - origLen) / origLen > 0.1) {
+            return new Response(
+              "Code appears minified. Minification does not help " +
+                "meet the size constraint — the server minifies " +
+                "before measuring. Write readable code with " +
+                "descriptive variable names and proper formatting.",
+              { status: 422 },
+            );
+          }
+        }
+      } finally {
+        await Deno.remove(tmp).catch(() => {});
+      }
+    }
+
     // Lint check via checker service
     try {
       const lintRes = await fetch(`${checkerUrl}/lint`, {

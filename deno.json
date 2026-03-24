@@ -24,7 +24,7 @@
     "zts": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-import --allow-ffi main.ts",
     "install": "deno install --global --allow-read --allow-write --allow-net --allow-env --allow-run=systemctl,tail,logrotate,deno,claude,kill --allow-import --allow-ffi --config deno.json -f -n zts main.ts",
     "test": "deno test --allow-env --allow-ffi --allow-read --allow-net=localhost,0.0.0.0 src/ --ignore=src/integration.test.ts",
-    "test:integration": "deno test --allow-env --allow-ffi --allow-read --allow-net=localhost,127.0.0.1,0.0.0.0 --allow-write=/tmp/zts-test,/tmp/zts-lint --allow-run=deno src/integration.test.ts",
+    "test:integration": "deno test --allow-env --allow-ffi --allow-read --allow-net=localhost,127.0.0.1,0.0.0.0 --allow-write=/tmp --allow-run src/integration.test.ts",
     "test:all": "deno task test && deno task test:integration",
     "ui:dev": "cd ui && npm run dev",
     "ui:build": "cd ui && npm run build",
