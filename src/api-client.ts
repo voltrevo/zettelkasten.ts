@@ -163,6 +163,7 @@ export interface PublishResult {
   url: string;
   httpUrl: string;
   autoPublished: string[];
+  lineCoverage?: number;
 }
 
 // ---- Request option types ----

@@ -585,9 +585,10 @@ async function route(req: Request): Promise<Response> {
       }
 
       // Check has tests (unless it IS a test)
+      let testRels: { from: string; kind: string; to: string }[] = [];
       if (!isTest) {
-        const tests = db.queryRelationships({ to: hash, kind: "tests" });
-        if (tests.length === 0) {
+        testRels = db.queryRelationships({ to: hash, kind: "tests" });
+        if (testRels.length === 0) {
           return new Response(
             "Cannot publish: no tests. Use zts add-test first.",
             { status: 422 },
@@ -595,10 +596,52 @@ async function route(req: Request): Promise<Response> {
         }
       }
 
+      // Coverage check (unless it IS a test)
+      if (!isTest && testRels.length > 0) {
+        try {
+          const covRes = await fetch(`${checkerUrl}/check-coverage`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              serverUrl,
+              targetHash: hash,
+              testHashes: testRels.map((r) => r.from),
+            }),
+          });
+          const cov = await covRes.json() as {
+            lineCoverage: number;
+            branchCoverage: number;
+            uncoveredLines: string;
+          };
+          if (cov.lineCoverage < 100 || cov.branchCoverage < 100) {
+            const parts: string[] = [];
+            if (cov.lineCoverage < 100) {
+              parts.push(`${cov.lineCoverage}% line coverage`);
+            }
+            if (cov.branchCoverage < 100) {
+              parts.push(`${cov.branchCoverage}% branch coverage`);
+            }
+            return new Response(
+              `Insufficient test coverage (${parts.join(", ")}).\n` +
+                `Uncovered:\n${cov.uncoveredLines}\n` +
+                `Add test(s) covering the missing lines with ` +
+                `zts add-test, then try publishing again.`,
+              { status: 422 },
+            );
+          }
+        } catch (e) {
+          return new Response(
+            `Coverage check failed: checker unreachable (${
+              (e as Error).message
+            })`,
+            { status: 503 },
+          );
+        }
+      }
+
       // Auto-publish associated test drafts
       const autoPublished: string[] = [];
       if (!isTest) {
-        const testRels = db.queryRelationships({ to: hash, kind: "tests" });
         for (const rel of testRels) {
           if (db.getAtomStatus(rel.from) === "draft") {
             const testAtom = db.getAtom(rel.from);

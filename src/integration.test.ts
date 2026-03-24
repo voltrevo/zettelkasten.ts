@@ -181,6 +181,90 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(pubResult.hash, atomHash);
     }, EMBED);
 
+    await timed(
+      t,
+      "publish rejects insufficient coverage",
+      async () => {
+        // Draft an atom with a branch
+        const src =
+          `// Classify number\nexport function classify(n: number): string {\n  if (n > 0) { return "positive"; }\n  if (n < 0) { return "negative"; }\n  return "zero";\n}\n`;
+        const d = await client.draft(src);
+        // Test that only covers one branch
+        const partial =
+          `export class Test {\n  static name = "classify: positive";\n  run(classify: (n: number) => string): void {\n    if (classify(5) !== "positive") throw new Error("fail");\n  }\n}\n`;
+        await client.addTest(partial, [d.hash]);
+        // Publish should fail — missing coverage on negative and zero branches
+        await assertRejects(
+          () => client.publish(d.hash, { description: "classify number" }),
+          ApiError,
+          "coverage",
+        );
+        log("insufficient coverage rejected as expected");
+        // Clean up: remove test relationships, then both atoms
+        const rels = await client.queryRelationships({ to: d.hash });
+        for (const rel of rels) {
+          await client.removeRelationship(rel.from, rel.kind, rel.to);
+          await client.deleteAtom(rel.from);
+        }
+        await client.deleteAtom(d.hash);
+      },
+      SUBPROCESS * 2,
+    );
+
+    await timed(
+      t,
+      "publish succeeds with full coverage",
+      async () => {
+        const src =
+          `// Classify number\nexport function classify(n: number): string {\n  if (n > 0) { return "positive"; }\n  if (n < 0) { return "negative"; }\n  return "zero";\n}\n`;
+        const d = await client.draft(src);
+        // Full coverage test
+        const full =
+          `export class Test {\n  static name = "classify: all branches";\n  run(classify: (n: number) => string): void {\n    if (classify(5) !== "positive") throw new Error("pos");\n    if (classify(-3) !== "negative") throw new Error("neg");\n    if (classify(0) !== "zero") throw new Error("zero");\n  }\n}\n`;
+        await client.addTest(full, [d.hash]);
+        const result = await client.publish(d.hash, {
+          description: "classify number",
+        });
+        assertEquals(result.hash, d.hash);
+        log("full coverage publish succeeded");
+        // Clean up
+        const rels = await client.queryRelationships({ to: d.hash });
+        for (const rel of rels) {
+          await client.removeRelationship(rel.from, rel.kind, rel.to);
+          await client.deleteAtom(rel.from);
+        }
+        await client.deleteAtom(d.hash);
+      },
+      SUBPROCESS * 2,
+    );
+
+    await timed(
+      t,
+      "publish rejects missed branch (ternary)",
+      async () => {
+        // Ternary: both branches on one line, test only exercises one
+        const src =
+          `// Absolute value via ternary\nexport function abs(n: number): number {\n  const result = n < 0 ? -n : n;\n  return result;\n}\n`;
+        const d = await client.draft(src);
+        const partial =
+          `export class Test {\n  static name = "abs: positive only";\n  run(abs: (n: number) => number): void {\n    if (abs(5) !== 5) throw new Error("fail");\n  }\n}\n`;
+        await client.addTest(partial, [d.hash]);
+        await assertRejects(
+          () => client.publish(d.hash, { description: "abs" }),
+          ApiError,
+          "coverage",
+        );
+        log("missed branch (ternary) rejected as expected");
+        const rels = await client.queryRelationships({ to: d.hash });
+        for (const rel of rels) {
+          await client.removeRelationship(rel.from, rel.kind, rel.to);
+          await client.deleteAtom(rel.from);
+        }
+        await client.deleteAtom(d.hash);
+      },
+      SUBPROCESS * 2,
+    );
+
     await timed(t, "archive a draft", async () => {
       const tmpSource =
         `// Temporary atom for archive test\nexport const TMP = 42;\n`;
