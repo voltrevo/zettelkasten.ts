@@ -12,6 +12,16 @@ shell access for exploratory work — running code, inspecting output, generatin
 test vectors. Don't break the container (no rm -rf /, no killing system
 processes), but otherwise use it freely.
 
+**Always prefix shell commands with `timeout <N>`** — especially `deno run`,
+`zts exec`, and anything that could loop forever. Use a low timeout (5–30s) for
+exploration and tests. If a command hangs, the entire iteration is lost.
+
+```sh
+timeout 10 deno run -A ./tmp/explore.ts
+timeout 5 zts exec <hash> args
+timeout 30 zts test <hash>
+```
+
 The corpus server is at `{{server-url}}`. Atoms are served over HTTP —
 `zts draft` and `zts publish` print the full URL. You can import atoms directly
 from this URL in any Deno program:
