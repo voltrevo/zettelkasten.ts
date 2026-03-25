@@ -1,78 +1,61 @@
 # zettelkasten.ts
 
-A content-addressed corpus of immutable TypeScript atoms, backed by Git and
-served over HTTP. Designed for AI agents and humans to accumulate, discover, and
-reuse small pieces of code across projects.
+A Deno server that stores immutable TypeScript atoms in a content-addressed,
+SQLite-backed corpus. Each atom is a single TypeScript module with exactly one
+value export, identified by a 25-character base36 keccak-256 hash.
 
-## Concept
+The vision: a persistent code knowledge base where AI agents accumulate reusable
+implementations over time — preferring to retrieve and reuse existing atoms over
+writing new ones.
 
-The unit of code is an **atom**: a single TypeScript module that exports exactly
-one named symbol. Atoms are identified by a 25-character base36 hash of their
-content. Once stored, an atom never changes — its hash is its permanent
-identity.
-
-Atoms may depend on other atoms via relative imports. They may not import
-external packages, URLs, or bare specifiers. Side effects and I/O are expressed
-through explicit capability interfaces (`cap` parameters), not ambient globals.
-
-This makes atoms small, composable, testable in isolation, and safe to reuse
-without surprises.
-
-## Setup
-
-**Requirements:** [Deno](https://deno.land) and [Ollama](https://ollama.com)
-(optional — only needed for semantic search).
+## Quick start
 
 ```sh
-# Clone and install the zts CLI
-git clone <repo>
-cd zettelkasten.ts
+# Install the CLI
 deno task install
 
-# Start the server as a systemd user service
-zts start
+# Create config (generates auth tokens)
+zts init
+
+# Start services
+zts checker start    # test execution service
+zts server start     # main server
+
+# Or run in foreground
+zts checker run &
+zts server run
 ```
 
-If you add Ollama for search:
+Optionally, pull an embedding model for semantic search:
 
 ```sh
 ollama pull nomic-embed-text
 ```
 
-The server listens on `http://localhost:8000`. Re-run `deno task install` any
-time `deno.json` changes to keep the CLI in sync.
+## Atom lifecycle
 
-## Server endpoints
+Atoms go through a draft → test → publish lifecycle:
 
+```sh
+# 1. Draft: upload atom, get hash + HTTP URL
+zts draft /tmp/myatom.ts
+
+# 2. Explore: import the draft via HTTP URL in any Deno program
+deno run -A /tmp/explore.ts
+
+# 3. Add tests: each test runs immediately against the target
+zts add-test /tmp/test.ts --targets <draft-hash>
+
+# 4. Publish: promote draft to permanent atom
+zts publish <hash> -d "brief description" -g <goal>
 ```
-POST /a                              store atom (X-Commit-Message header required)
-GET  /a/<aa>/<bb>/<rest>.ts          retrieve atom by content address
-GET  /bundle/<hash>                  download ZIP of atom + all transitive deps
-POST /a/<hash>/description           store a searchable description (requires Ollama)
-GET  /a/<hash>/description           retrieve description
-GET  /search?q=<text>[&k=10]         semantic nearest-neighbor search (requires Ollama)
-POST /relationships                  add a relationship; runs test if kind=tests
-DELETE /relationships                remove a relationship
-GET  /relationships?from=&to=&kind=  query relationships (at least one param required)
-```
 
-## CLI reference
-
-```
-zts start                         install and start daemon (enable on boot)
-zts stop                          stop daemon and disable on boot
-zts restart                       reinstall unit and restart daemon
-zts run                           run server in foreground (no systemd)
-zts log [-f] [-n <lines>]         show server log
-
-zts post -m <message> [file]      store atom (stdin if no file)
-zts get <hash>                    print atom source
-zts describe <hash> -m <text>     store searchable description
-zts search <query> [-k <n>]       semantic search, default k=10
-zts test <hash>                   run all registered tests for an atom
-zts exec <hash> [args...]         run atom's main(globalThis)
-zts bundle <hash> [-o <dir>]      download ZIP bundle (or extract to dir)
-```
+Publishing requires:
+- All imported atoms are already published
+- At least one passing test (test atoms are exempt)
+- 100% line and branch coverage across all tests
+- Code passes `deno fmt` formatting check (>10% expansion is rejected)
+- Description is ASCII only
 
 ## Writing atoms
 
@@ -80,12 +63,11 @@ An atom is a single `.ts` file that:
 
 - Exports **exactly one named value** (function, class, const, or enum)
 - Imports only other atoms via relative paths: `../../xx/yy/<21chars>.ts`
-- Has no `export default`
-- Uses `const` not `let` for exports
-- Fits within 768 bytes gzipped (after minification)
+- Has no `export default`, no `export let`
+- Fits within 1024 bytes gzipped after minification
+- Type-only exports (`export type`, `export interface`) are unlimited
 
 ```typescript
-// A valid atom
 export function gcd(a: number, b: number): number {
   while (b !== 0) {
     const t = b;
@@ -96,8 +78,9 @@ export function gcd(a: number, b: number): number {
 }
 ```
 
-Type-only exports (`export type`, `export interface`) are allowed alongside the
-single value export:
+## Capability convention
+
+Atoms that need external I/O accept a `cap` parameter as their first argument:
 
 ```typescript
 export type Cap = {
@@ -105,13 +88,14 @@ export type Cap = {
   Deno: { args: readonly string[] };
 };
 
-export function main(cap: Cap): void { ... }
+export function main(cap: Cap): void {
+  cap.console.log(cap.Deno.args.join(" "));
+}
 ```
 
-## Capability convention
-
-Atoms that need external I/O accept a `cap` parameter as their first argument.
-The type of `cap` declares exactly what external surface the atom uses:
+Callers pass `globalThis`. Tests substitute only what they need. If an atom
+imports other atoms that export `Cap`, its own `Cap` is the intersection of
+theirs plus any additional capabilities it needs directly.
 
 ```typescript
 export type Cap = {
@@ -124,96 +108,17 @@ export function pollEndpoint(cap: Cap, url: string): Promise<number> {
 }
 ```
 
-Callers pass `globalThis` (or a subset). Tests substitute only what they need.
-If an atom imports other atoms that export `Cap`, its own `Cap` is the
-intersection of theirs plus any additional capabilities it needs directly.
+## Writing tests
 
-## Development workflow
-
-### 1. Search before you write
-
-Before implementing something, check whether it already exists:
-
-```sh
-zts search "greatest common divisor"
-zts search "check if a number is prime"
-```
-
-If a match looks right, retrieve and read it:
-
-```sh
-zts get <hash>
-```
-
-### 2. Write the atom
-
-Write your atom to a temp file. Keep it small and focused — one export, no
-external imports. If it needs I/O, define a `Cap` type.
+A test atom exports a class named `Test` with a `static name` and a
+`run(target)` method:
 
 ```typescript
-// /tmp/is-prime.ts
-export function isPrime(n: number): boolean {
-  if (n < 2) return false;
-  if (n === 2) return true;
-  if (n % 2 === 0) return false;
-  for (let i = 3; i * i <= n; i += 2) {
-    if (n % i === 0) return false;
-  }
-  return true;
-}
-```
-
-To import another atom, use its hash path. Get the path from `zts post` output
-or from `zts search`:
-
-```typescript
-import { gcd } from "../../29/q3/3z8rqiv6wi7e6wmkfogud.ts";
-```
-
-### 3. Store the atom
-
-```sh
-zts post -m "primality test via trial division" /tmp/is-prime.ts
-# → /a/1e/00/ajro7glwpdy5jkv48v09e.ts
-```
-
-The hash is the path without `/a/`, slashes, and `.ts`:
-`1e00ajro7glwpdy5jkv48v09e`.
-
-A 200 response means the atom already existed (idempotent). A 201 means it was
-newly stored.
-
-### 4. Describe it for search
-
-Post a plain-English description so the atom is discoverable by future queries:
-
-```sh
-zts describe 1e00ajro7glwpdy5jkv48v09e -m "Returns true if a positive integer \
-is prime using trial division up to the square root. Returns false for integers \
-less than 2. Handles 2 as a special case. Runs in O(sqrt(n)) time."
-```
-
-A good description covers what it computes, the meaning of inputs and outputs,
-edge cases, and any non-obvious behavior from its dependencies. Richer
-descriptions produce better search results.
-
-### 5. Write and register a test
-
-A test atom exports a class named `Test` with a `static name` string and a
-`run(target)` method. The type of `target` should be the concrete type the test
-requires. The test creates its own mocks — no real I/O allowed.
-
-```typescript
-// /tmp/is-prime-test.ts
 export class Test {
-  static name = "isPrime: known primes and composites";
-  run(target: (n: number) => boolean): void {
-    for (const p of [2, 3, 5, 7, 11]) {
-      if (!target(p)) throw new Error(`${p} should be prime`);
-    }
-    for (const c of [0, 1, 4, 9]) {
-      if (target(c)) throw new Error(`${c} should not be prime`);
-    }
+  static name = "gcd: known values";
+  run(target: (a: number, b: number) => number): void {
+    if (target(48, 18) !== 6) throw new Error("48,18");
+    if (target(0, 5) !== 5) throw new Error("0,5");
   }
 }
 ```
@@ -221,113 +126,192 @@ export class Test {
 For atoms that take a `Cap` parameter, create a mock cap inline:
 
 ```typescript
-// /tmp/test-main.ts
-type Cap = {
-  console: Pick<Console, "log" | "error">;
-  Deno: { args: readonly string[] };
-};
 export class Test {
-  static name = "fraction main: simplifies 6/8 to 3/4";
-  run(target: (cap: Cap) => void): void {
+  static name = "main: echoes args";
+  run(target: (cap: { console: { log: (s: string) => void }; Deno: { args: readonly string[] } }) => void): void {
     const out: string[] = [];
-    const cap: Cap = {
-      console: {
-        log: (s) => {
-          out.push(s);
-        },
-        error: () => {},
-      },
-      Deno: { args: ["6/8"] },
-    };
-    target(cap);
-    if (out[0] !== "3/4") throw new Error(`got "${out[0]}"`);
+    target({
+      console: { log: (s) => out.push(s) },
+      Deno: { args: ["hello", "world"] },
+    });
+    if (out[0] !== "hello world") throw new Error(out[0]);
   }
 }
 ```
 
-Post the test atom, then register it against the target. The server runs the
-test before storing the relationship — a 422 means it failed and nothing was
-stored:
+## Atom rules
 
-```sh
-zts post -m "isPrime test" /tmp/is-prime-test.ts
-# → /a/xx/yy/<rest>.ts  (test-hash = xxyy<rest>)
-
-curl -X POST http://localhost:8000/relationships \
-  -H "content-type: application/json" \
-  -d '{"kind":"tests","from":"<test-hash>","to":"1e00ajro7glwpdy5jkv48v09e"}'
-# 201 = registered, 422 = test failed (body has test output)
-```
-
-### 6. Run registered tests
-
-```sh
-zts test 1e00ajro7glwpdy5jkv48v09e
-```
-
-Fetches all registered tests for the atom and runs them via `deno test`,
-importing atoms live from the server. Output is standard Deno test format.
-
-### 7. Execute and bundle
-
-Run an atom directly if it exports `main(cap)`:
-
-```sh
-zts exec 2jkr3h8zsm3c0xcgzbmbrkath 3/12
-# → 1/4
-```
-
-Bundle an atom with all its dependencies for offline use or distribution:
-
-```sh
-zts bundle 2jkr3h8zsm3c0xcgzbmbrkath -o /tmp/fraction
-# Extracts to /tmp/fraction/<hash8>/run.ts + a/...
-deno run --allow-all /tmp/fraction/2jkr3h8z/run.ts 3/12
-# → 1/4
-```
-
-## Atom rules (enforced at submission)
-
-| Rule              | Detail                                                                        |
-| ----------------- | ----------------------------------------------------------------------------- |
-| One value export  | Function, class, const, or enum. Named only — `export default` is forbidden.  |
-| Type exports OK   | `export type` and `export interface` don't count toward the limit.            |
+| Rule | Detail |
+|------|--------|
+| One value export | Function, class, const, or enum. Named only — `export default` is forbidden. |
+| Type exports OK | `export type` and `export interface` don't count toward the limit. |
 | Atom-only imports | Only `../../xx/yy/<21chars>.ts` paths. No npm, JSR, URLs, or bare specifiers. |
-| No exported `let` | All value exports must be `const`, function, class, or enum.                  |
-| Size limit        | ≤ 768 bytes gzipped after minification.                                       |
+| No exported `let` | All value exports must be `const`, function, class, or enum. |
+| Size limit | ≤ 1024 bytes gzipped after minification. |
+| Formatted | Code must pass `deno fmt` — the server formats on ingest and rejects heavily minified code. |
 
-## Storage layout
+## Development workflow
 
-```
-~/.local/share/zettelkasten/
-  a/
-    xx/           ← first 2 chars of hash
-      yy/         ← next 2 chars
-        <21chars>.ts
-  zts.db          ← SQLite: descriptions + embedding vectors
-  server.log      ← append-only request log
-```
-
-Each stored atom is committed to a Git repo at that path with the message
-`<hash8>: <your message>`, giving a full audit trail.
-
-## Semantic search setup
-
-Search requires Ollama running locally with `nomic-embed-text` pulled:
+### 1. Search before you write
 
 ```sh
-ollama pull nomic-embed-text
-# Ollama defaults to http://localhost:11434
+zts search "greatest common divisor"
+zts search --code "function gcd"
 ```
 
-Override with environment variables:
+If a match looks right, check for the best version:
 
 ```sh
-ZTS_EMBED_URL=http://my-server:11434/api/embeddings
-ZTS_EMBED_MODEL=nomic-embed-text
-ZTS_EMBED_DIM=768
+zts tops <hash>
+zts get <hash>
+```
+
+### 2. Draft and explore
+
+```sh
+zts draft /tmp/my-atom.ts
+# → <hash>
+# → http://localhost:7483/a/xx/yy/rest.ts
+```
+
+Explore with real inputs using the HTTP URL:
+
+```sh
+cat > /tmp/explore.ts << 'EOF'
+import { myFn } from "http://localhost:7483/a/xx/yy/rest.ts";
+console.log(myFn(42));
+EOF
+deno run -A /tmp/explore.ts
+```
+
+### 3. Test and publish
+
+```sh
+zts add-test /tmp/test.ts --targets <hash>
+zts publish <hash> -d "description of what it does" -g <goal>
+```
+
+If coverage is insufficient, the publish error shows exactly which lines need
+tests. Add more tests with `zts add-test` and try again.
+
+### 4. Execute and bundle
+
+Run an atom that exports `main(cap)`:
+
+```sh
+zts exec <hash> arg1 arg2
+```
+
+Bundle an atom with all dependencies for offline use:
+
+```sh
+zts bundle <hash> -o /tmp/output
+deno run --allow-all /tmp/output/<hash8>/run.ts arg1
+```
+
+## Storage
+
+All data lives in `~/.local/share/zettelkasten/`:
+
+```
+zts.db         ← SQLite: atoms, embeddings, relationships, properties,
+                 test_evaluation, test_runs, goals, prompts, log
+server.log     ← append-only process log
+config.json5   ← auth tokens, ports, URLs (chmod 600)
+```
+
+The hash format is 25-char base36 keccak-256. The full hash splits as
+`hash[0:2]/hash[2:4]/hash[4:]` for URL paths (2 + 2 + 21 = 25 chars).
+
+## Semantic search
+
+Requires Ollama with `nomic-embed-text`. Configure in `config.json5`:
+
+```json5
+{
+  embedUrl: "http://localhost:11434/api/embeddings",
+  embedModel: "nomic-embed-text",
+  embedDim: 768,
+}
 ```
 
 If Ollama is unreachable at startup, the server warns but continues — existing
-embeddings remain searchable, and `POST /a/<hash>/description` returns 503 until
-the service is available.
+embeddings remain searchable, and description updates return 503 until
+available.
+
+## CLI reference
+
+Run `zts -h` for the full command list. Key commands:
+
+```
+zts draft <file>                 upload atom as draft
+zts add-test <file> --targets h  add test, run immediately
+zts publish <hash> -d <desc>     promote draft (requires tests + coverage)
+zts search <query>               semantic search
+zts search --code <query>        full-text source search
+zts exec <hash> [args]           run atom's main(globalThis)
+zts info <hash>                  source, description, relationships
+zts tops <hash>                  navigate supersedes chain to best version
+zts recent [-n N] [--goal G]     recent published atoms
+zts status                       corpus health summary
+```
+
+Hash prefixes work everywhere (e.g. `zts info 3ax9`).
+
+## Auth
+
+Bearer tokens in `config.json5` (created by `zts init`), three tiers:
+
+- **unauthed** — reads (get, list, search, info)
+- **dev** — writes (draft, publish, describe, test, relate)
+- **admin** — goal CRUD, starred property, prompt overrides
+
+## Docker
+
+A full Docker setup runs the server, checker, agent, Ollama, and a squid proxy:
+
+```sh
+cd docker
+docker compose up -d
+```
+
+See [docker/README.md](docker/README.md) for details.
+
+## Agent loop
+
+The `zts worker` command runs an autonomous agent that picks goals and builds
+atoms:
+
+```sh
+zts worker setup        # create workspace
+zts worker run          # start the agent loop
+```
+
+The agent prompt is in `src/worker-prompt.md`. Goals are managed via `zts goal`
+commands.
+
+## Development
+
+```sh
+deno task test              # unit tests
+deno task test:integration  # integration tests
+deno task test:all          # both
+deno task ui:dev            # Vite dev server for web UI
+deno task precommit         # fmt + typecheck + test + lint + ui build
+```
+
+## Architecture
+
+| File | Purpose |
+|------|---------|
+| `src/server.ts` | HTTP server: routes, atom storage, search, auth |
+| `src/checker.ts` | Test checker: sandboxed test execution, coverage, lint, fmt |
+| `src/db.ts` | SQLite wrapper: all tables, schema migrations |
+| `src/api-client.ts` | Typed API client shared by CLI and web UI |
+| `src/worker.ts` | Agent loop: workspace management, claude subprocess |
+| `src/worker-prompt.md` | Agent prompt with walkthrough example |
+| `src/validate.ts` | Atom validation: export count, import paths, size limit |
+| `src/minify.ts` | Comment stripping + whitespace collapse for size check |
+| `src/embed.ts` | Embedding API client (Ollama), cosine similarity |
+| `main.ts` | CLI entry point: all subcommands |
+| `ui/` | Vite + TypeScript web UI |
