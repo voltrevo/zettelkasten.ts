@@ -51,6 +51,7 @@ zts publish <hash> -d "brief description" -g <goal>
 ```
 
 Publishing requires:
+
 - All imported atoms are already published
 - At least one passing test (test atoms are exempt)
 - 100% line and branch coverage across all tests
@@ -128,7 +129,14 @@ For atoms that take a `Cap` parameter, create a mock cap inline:
 ```typescript
 export class Test {
   static name = "main: echoes args";
-  run(target: (cap: { console: { log: (s: string) => void }; Deno: { args: readonly string[] } }) => void): void {
+  run(
+    target: (
+      cap: {
+        console: { log: (s: string) => void };
+        Deno: { args: readonly string[] };
+      },
+    ) => void,
+  ): void {
     const out: string[] = [];
     target({
       console: { log: (s) => out.push(s) },
@@ -141,14 +149,14 @@ export class Test {
 
 ## Atom rules
 
-| Rule | Detail |
-|------|--------|
-| One value export | Function, class, const, or enum. Named only — `export default` is forbidden. |
-| Type exports OK | `export type` and `export interface` don't count toward the limit. |
-| Atom-only imports | Only `../../xx/yy/<21chars>.ts` paths. No npm, JSR, URLs, or bare specifiers. |
-| No exported `let` | All value exports must be `const`, function, class, or enum. |
-| Size limit | ≤ 1024 bytes gzipped after minification. |
-| Formatted | Code must pass `deno fmt` — the server formats on ingest and rejects heavily minified code. |
+| Rule              | Detail                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| One value export  | Function, class, const, or enum. Named only — `export default` is forbidden.                |
+| Type exports OK   | `export type` and `export interface` don't count toward the limit.                          |
+| Atom-only imports | Only `../../xx/yy/<21chars>.ts` paths. No npm, JSR, URLs, or bare specifiers.               |
+| No exported `let` | All value exports must be `const`, function, class, or enum.                                |
+| Size limit        | ≤ 1024 bytes gzipped after minification.                                                    |
+| Formatted         | Code must pass `deno fmt` — the server formats on ingest and rejects heavily minified code. |
 
 ## Development workflow
 
@@ -302,16 +310,16 @@ deno task precommit         # fmt + typecheck + test + lint + ui build
 
 ## Architecture
 
-| File | Purpose |
-|------|---------|
-| `src/server.ts` | HTTP server: routes, atom storage, search, auth |
-| `src/checker.ts` | Test checker: sandboxed test execution, coverage, lint, fmt |
-| `src/db.ts` | SQLite wrapper: all tables, schema migrations |
-| `src/api-client.ts` | Typed API client shared by CLI and web UI |
-| `src/worker.ts` | Agent loop: workspace management, claude subprocess |
-| `src/worker-prompt.md` | Agent prompt with walkthrough example |
-| `src/validate.ts` | Atom validation: export count, import paths, size limit |
-| `src/minify.ts` | Comment stripping + whitespace collapse for size check |
-| `src/embed.ts` | Embedding API client (Ollama), cosine similarity |
-| `main.ts` | CLI entry point: all subcommands |
-| `ui/` | Vite + TypeScript web UI |
+| File                   | Purpose                                                     |
+| ---------------------- | ----------------------------------------------------------- |
+| `src/server.ts`        | HTTP server: routes, atom storage, search, auth             |
+| `src/checker.ts`       | Test checker: sandboxed test execution, coverage, lint, fmt |
+| `src/db.ts`            | SQLite wrapper: all tables, schema migrations               |
+| `src/api-client.ts`    | Typed API client shared by CLI and web UI                   |
+| `src/worker.ts`        | Agent loop: workspace management, claude subprocess         |
+| `src/worker-prompt.md` | Agent prompt with walkthrough example                       |
+| `src/validate.ts`      | Atom validation: export count, import paths, size limit     |
+| `src/minify.ts`        | Comment stripping + whitespace collapse for size check      |
+| `src/embed.ts`         | Embedding API client (Ollama), cosine similarity            |
+| `main.ts`              | CLI entry point: all subcommands                            |
+| `ui/`                  | Vite + TypeScript web UI                                    |

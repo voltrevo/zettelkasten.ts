@@ -103,6 +103,33 @@ export function moreTrivia(cap: Cap) {
 
 If no external capabilities are needed, skip cap entirely.
 
+## Main atoms (CLIs)
+
+Goals often require a runnable CLI: `zts exec <hash> [args]`. A main atom
+exports a `main` function that takes `cap` typed as the subset of `globalThis`
+it needs:
+
+```ts
+// CLI: zts exec <hash> <url>
+import { httpGet } from "../../ab/cd/efghijklmnopqrstuvw.ts";
+
+export type Cap = {
+  Deno: { args: string[] };
+  console: { log(s: string): void };
+};
+
+export function main(cap: Cap): void | Promise<void> {
+  const url = cap.Deno.args[0];
+  const body = httpGet(url);
+  cap.console.log(body);
+}
+```
+
+`zts exec` calls `main(globalThis)`, so the atom gets the real runtime. Tests
+substitute a mock cap. The main atom itself is usually thin — it parses args,
+calls library atoms, and prints output. Keep logic in the library atoms, not in
+main.
+
 ## Testing
 
 Tests are atoms. Every non-test atom must have at least one test before it can
