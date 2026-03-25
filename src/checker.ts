@@ -339,6 +339,40 @@ ${testCalls}
       }
     }
 
+    // Parse lcov for uncovered branches (BRDA lines with hit count 0)
+    // These may be on lines that --detailed doesn't show
+    const lcovPath = `${covDir}/lcov.info`;
+    try {
+      const lcov = await Deno.readTextFile(lcovPath);
+      let inTargetFile = false;
+      const branchLines = new Set<number>();
+      for (const line of lcov.split("\n")) {
+        if (line.startsWith("SF:") && line.includes("target.ts")) {
+          inTargetFile = true;
+        } else if (line === "end_of_record") {
+          inTargetFile = false;
+        } else if (inTargetFile && line.startsWith("BRDA:")) {
+          // BRDA:line,block,branch,hits
+          const parts = line.slice(5).split(",");
+          if (parts[3] === "0") branchLines.add(parseInt(parts[0]));
+        }
+      }
+      // Add branch info for lines not already in uncoveredLines
+      if (branchLines.size > 0) {
+        const coveredLineNums = new Set(
+          uncoveredLines.map((l) => parseInt(l.trim())),
+        );
+        const srcLines = targetSource.split("\n");
+        for (const ln of [...branchLines].sort((a, b) => a - b)) {
+          if (!coveredLineNums.has(ln) && srcLines[ln - 1]) {
+            uncoveredLines.push(
+              `  ${ln} |   ${srcLines[ln - 1]}  [branch not taken]`,
+            );
+          }
+        }
+      }
+    } catch { /* lcov parse is best-effort */ }
+
     return new Response(
       JSON.stringify({
         lineCoverage: Math.round(lineCoverage * 10) / 10,
