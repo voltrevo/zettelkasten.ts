@@ -238,6 +238,15 @@ atoms. Pick the most foundational piece — the one other pieces would import �
 and make that your target for this iteration. Note the remaining pieces in your
 summary.
 
+**Splitting is also a debugging strategy.** If something isn't working and you
+can't figure out why, extract the suspicious part into its own atom with its own
+tests. A function that's hard to debug inside a larger atom becomes easy to
+debug when you can test it in isolation. For example, if a DEFLATE decoder fails
+on dynamic Huffman blocks, don't keep rewriting the whole decoder — extract the
+dynamic header parser as a separate atom, test it against known reference
+values, and fix it there. Once the sub-atom works and is published, the parent
+atom simply imports it.
+
 Explore with real inputs — use the HTTP URL from the draft output:
 
 ```
