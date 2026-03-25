@@ -621,9 +621,12 @@ async function route(req: Request): Promise<Response> {
             if (cov.branchCoverage < 100) {
               parts.push(`${cov.branchCoverage}% branch coverage`);
             }
+            const uncovered = cov.uncoveredLines
+              ? `Uncovered:\n${cov.uncoveredLines}`
+              : `(uncovered line details unavailable)`;
             return new Response(
               `Insufficient test coverage (${parts.join(", ")}).\n` +
-                `Uncovered:\n${cov.uncoveredLines}\n` +
+                `${uncovered}\n` +
                 `Add test(s) covering the missing lines with ` +
                 `zts add-test, then try publishing again.`,
               { status: 422 },
