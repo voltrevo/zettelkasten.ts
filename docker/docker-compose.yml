@@ -55,7 +55,6 @@ services:
       dockerfile: docker/Dockerfile.agent
     container_name: zts-agent
     environment:
-      - ZTS_DEV_TOKEN
       - HTTP_PROXY=http://gateway:3128
       - HTTPS_PROXY=http://gateway:3128
       - http_proxy=http://gateway:3128
@@ -64,6 +63,7 @@ services:
       - no_proxy=zts-server,zts-checker,ollama,localhost,127.0.0.1
     volumes:
       - agent-workspace:/home/zts/workspaces
+      - zts-data:/server-data:ro
     networks:
       - zts-net
     depends_on:
