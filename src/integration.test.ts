@@ -121,36 +121,27 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(draftResult.existing, false);
     });
 
-    await timed(t, "draft rejects minified code", async () => {
-      const minified =
-        `// minified atom\nexport function f(a:number,b:number):number{const c=a+b;const d=c*2;if(d>10){return d-10;}else{return d+10;}}\n`;
+    await timed(t, "draft rejects atom over token limit", async () => {
+      // Generate source with >768 tokens
+      const lines = [
+        "// over limit\nexport function big(): number {\n  let r = 0;\n",
+      ];
+      for (let i = 0; i < 200; i++) {
+        lines.push(`  r = r + ${i} * ${i + 1};\n`);
+      }
+      lines.push("  return r;\n}\n");
       await assertRejects(
-        () => client.draft(minified),
+        () => client.draft(lines.join("")),
         ApiError,
-        "minified",
+        "tokens",
       );
-    }, SUBPROCESS);
-
-    let readableOverrideHash = "";
-    await timed(
-      t,
-      "draft accepts minified code with readable override",
-      async () => {
-        const minified =
-          `// minified atom\nexport function f(a:number,b:number):number{const c=a+b;const d=c*2;if(d>10){return d-10;}else{return d+10;}}\n`;
-        const result = await client.draft(minified, { readable: true });
-        assertEquals(result.hash.length, 25);
-        readableOverrideHash = result.hash;
-      },
-      SUBPROCESS,
-    );
+    });
 
     await timed(t, "list drafts shows unpublished atom", async () => {
       const drafts = await client.listDrafts();
       log("drafts:", drafts.map((d) => d.hash.slice(0, 8) + "…"));
-      assertEquals(drafts.length, 2);
-      assertEquals(drafts.some((d) => d.hash === atomHash), true);
-      assertEquals(drafts.some((d) => d.hash === readableOverrideHash), true);
+      assertEquals(drafts.length, 1);
+      assertEquals(drafts[0].hash, atomHash);
     });
 
     let _addTestHash = "";

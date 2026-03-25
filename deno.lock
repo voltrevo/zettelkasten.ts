@@ -18,6 +18,7 @@
     "npm:@noble/hashes@*": "1.8.0",
     "npm:@noble/hashes@^1.6.0": "1.8.0",
     "npm:json5@^2.2.3": "2.2.3",
+    "npm:typescript@*": "5.9.3",
     "npm:typescript@^5.8.2": "5.9.3"
   },
   "jsr": {

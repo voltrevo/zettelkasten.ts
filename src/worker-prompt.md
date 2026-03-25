@@ -42,11 +42,11 @@ This works for both published atoms and your drafts.
    `../../1k/1b/ks5opabqf39499ludtcni.ts` (split: 2/2/21). No npm, JSR, URLs, or
    bare specifiers.
 3. **No `export let`** — use `const`.
-4. **Size limit: 1024 bytes** gzipped after minification. The server minifies
-   before measuring, so removing comments/whitespace won't help. If too big,
-   split into smaller atoms at natural boundaries.
+4. **Size limit: 768 tokens.** Measured by the TypeScript scanner, excluding
+   comments. Comments are free. If too big, split into smaller atoms at natural
+   boundaries.
 5. **Description comment.** First line(s) of every atom must be a comment
-   describing what it does. Comments are free (stripped by minifier).
+   describing what it does. Comments don't count toward the token limit.
 
 ## Pure TypeScript
 
@@ -184,8 +184,7 @@ Hash prefixes work everywhere (e.g. `zts info 3ax9`). Relationship kinds:
 ## Conventions
 
 - ASCII only in descriptions (no Unicode)
-- TypeScript type annotations count toward gzip budget (minifier can't strip
-  them)
+- TypeScript type annotations count toward the token limit
 - Use `127.0.0.1` not `localhost` for Deno TCP
 - Tag atoms with goals when publishing: `-g <goal>`
 - Mark `supersedes` when your atom improves on an existing one (between

@@ -65,7 +65,7 @@ An atom is a single `.ts` file that:
 - Exports **exactly one named value** (function, class, const, or enum)
 - Imports only other atoms via relative paths: `../../xx/yy/<21chars>.ts`
 - Has no `export default`, no `export let`
-- Fits within 1024 bytes gzipped after minification
+- Fits within 768 non-comment tokens
 - Type-only exports (`export type`, `export interface`) are unlimited
 
 ```typescript
@@ -155,7 +155,7 @@ export class Test {
 | Type exports OK   | `export type` and `export interface` don't count toward the limit.                          |
 | Atom-only imports | Only `../../xx/yy/<21chars>.ts` paths. No npm, JSR, URLs, or bare specifiers.               |
 | No exported `let` | All value exports must be `const`, function, class, or enum.                                |
-| Size limit        | ≤ 1024 bytes gzipped after minification.                                                    |
+| Size limit        | ≤ 768 non-comment tokens (comments don't count toward the limit).                           |
 | Formatted         | Code must pass `deno fmt` — the server formats on ingest and rejects heavily minified code. |
 
 ## Development workflow

@@ -50,7 +50,7 @@ world-readable. Override path with `--config <path>`.
    `../../1k/1b/ks5opabqf39499ludtcni.ts`. No npm, no JSR, no URLs, no bare
    specifiers.
 4. **No exported `let`** — all exports must be `const` or function/class/enum.
-5. **Size limit** — ≤ 1024 bytes gzipped after minification.
+5. **Size limit** — ≤ 768 non-comment tokens (comments don't count).
 
 ## Capability convention (Cap)
 

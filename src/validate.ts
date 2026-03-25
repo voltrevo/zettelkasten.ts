@@ -1,5 +1,4 @@
 import ts from "typescript";
-import { minify } from "./minify.ts";
 
 // Relative import path that any atom uses to reference another atom:
 // from a/xx/yy/<rest>.ts → ../../<xx>/<yy>/<rest>.ts
@@ -8,23 +7,33 @@ const ATOM_IMPORT_RE =
 
 export type ValidationError = { message: string };
 
-export const MAX_GZIP_BYTES = 1024;
+export const MAX_TOKENS = 768;
 
-async function gzipSize(text: string): Promise<number> {
-  const stream = new CompressionStream("gzip");
-  const writer = stream.writable.getWriter();
-  writer.write(new TextEncoder().encode(text));
-  writer.close();
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of stream.readable as AsyncIterable<Uint8Array>) {
-    chunks.push(chunk);
+/** Count non-comment, non-whitespace tokens using the TypeScript scanner. */
+export function countTokens(source: string): number {
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    false,
+    ts.LanguageVariant.Standard,
+    source,
+  );
+  let count = 0;
+  while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken) {
+    const kind = scanner.getToken();
+    if (
+      kind === ts.SyntaxKind.SingleLineCommentTrivia ||
+      kind === ts.SyntaxKind.MultiLineCommentTrivia ||
+      kind === ts.SyntaxKind.NewLineTrivia ||
+      kind === ts.SyntaxKind.WhitespaceTrivia
+    ) continue;
+    count++;
   }
-  return chunks.reduce((n, c) => n + c.length, 0);
+  return count;
 }
 
-export async function validateAtom(
+export function validateAtom(
   source: string,
-): Promise<ValidationError | null> {
+): ValidationError | null {
   const file = ts.createSourceFile(
     "atom.ts",
     source,
@@ -88,13 +97,12 @@ export async function validateAtom(
     errors.push(`atom must export exactly one symbol (found ${exportCount})`);
   }
 
-  // Size check on minified+gzipped source
-  const size = await gzipSize(minify(source));
-  if (size > MAX_GZIP_BYTES) {
+  // Token count check (comments excluded)
+  const tokens = countTokens(source);
+  if (tokens > MAX_TOKENS) {
     errors.push(
-      `atom is ${size} bytes (min+gz); limit is ${MAX_GZIP_BYTES}. ` +
-        `The server minifies before measuring — removing comments or whitespace will not reduce this number. ` +
-        `Split into smaller atoms instead.`,
+      `atom is ${tokens} tokens; limit is ${MAX_TOKENS}. ` +
+        `Comments don't count. Split into smaller atoms instead.`,
     );
   }
 

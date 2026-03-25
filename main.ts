@@ -1,7 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { parseZip } from "./src/bundle.ts";
-import { minify } from "./src/minify.ts";
-import { MAX_GZIP_BYTES } from "./src/validate.ts";
+import { countTokens, MAX_TOKENS } from "./src/validate.ts";
 import { serve } from "./src/server.ts";
 import { serveChecker } from "./src/checker.ts";
 import {
@@ -219,8 +218,8 @@ zts search --code <query> [-k N]
   imports, imported-by, tests, tested-by, properties.`,
 
   size: `zts size <file>
-  Estimate gzip size (client-side minify + compress). Shows whether the
-  atom fits within the ${MAX_GZIP_BYTES}-byte limit.`,
+  Count non-comment tokens. Shows whether the atom fits within the
+  ${MAX_TOKENS}-token limit.`,
 
   rels: `zts rels [--from H] [--to H] [--kind K]
   Query relationships. At least one filter required.
@@ -1679,25 +1678,15 @@ async function cmdSize(rest: string[]): Promise<void> {
     Deno.exit(1);
   }
   const source = await Deno.readTextFile(file);
-  const minified = minify(source);
-  const stream = new CompressionStream("gzip");
-  const writer = stream.writable.getWriter();
-  writer.write(new TextEncoder().encode(minified));
-  writer.close();
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of stream.readable as AsyncIterable<Uint8Array>) {
-    chunks.push(chunk);
-  }
-  const size = chunks.reduce((n, c) => n + c.length, 0);
-  const status = size <= MAX_GZIP_BYTES ? "within" : "EXCEEDS";
+  const tokens = countTokens(source);
+  const status = tokens <= MAX_TOKENS ? "within" : "EXCEEDS";
   console.log(
-    `${size} bytes (min+gz) — ${status} ${MAX_GZIP_BYTES} byte limit`,
+    `${tokens} tokens — ${status} ${MAX_TOKENS} token limit`,
   );
-  if (size > MAX_GZIP_BYTES) {
+  if (tokens > MAX_TOKENS) {
     console.error(
-      `Split into smaller atoms. Minification will not help — the ` +
-        `server minifies before measuring. Extract the most foundational ` +
-        `piece as a separate atom, then import it.`,
+      `Comments don't count toward the limit. Split into smaller atoms. ` +
+        `Extract the most foundational piece as a separate atom, then import it.`,
     );
   }
 }

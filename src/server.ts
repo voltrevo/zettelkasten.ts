@@ -16,9 +16,13 @@ import {
   fetchEmbedding,
 } from "./embed.ts";
 import { HnswIndex } from "./hnsw.ts";
-import { minify } from "./minify.ts";
 import { getDefaultPrompt, type PromptName } from "./prompts.ts";
-import { extractTestName, isTestAtom, validateAtom } from "./validate.ts";
+import {
+  countTokens,
+  extractTestName,
+  isTestAtom,
+  validateAtom,
+} from "./validate.ts";
 
 const brotliCompressP = promisify(brotliCompress);
 
@@ -59,18 +63,6 @@ let hnswIndex: HnswIndex;
 let authConfig: AuthConfig;
 let serverUrl: string;
 let checkerUrl: string;
-
-async function gzipSize(text: string): Promise<number> {
-  const stream = new CompressionStream("gzip");
-  const writer = stream.writable.getWriter();
-  writer.write(new TextEncoder().encode(text));
-  writer.close();
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of stream.readable as AsyncIterable<Uint8Array>) {
-    chunks.push(chunk);
-  }
-  return chunks.reduce((n, c) => n + c.length, 0);
-}
 
 /** Run test atoms against a target via the checker service. Records results in test_runs. */
 async function runTests(
@@ -295,12 +287,12 @@ async function route(req: Request): Promise<Response> {
       return new Response("Empty content", { status: 400 });
     }
 
-    const validationError = await validateAtom(content);
+    const validationError = validateAtom(content);
     if (validationError) {
       return new Response(validationError.message, { status: 422 });
     }
 
-    // Format with deno fmt (via checker service) and check for minification
+    // Auto-format with deno fmt (via checker service)
     try {
       const fmtRes = await fetch(`${checkerUrl}/fmt`, {
         method: "POST",
@@ -310,19 +302,6 @@ async function route(req: Request): Promise<Response> {
         formatted: string;
         changed: boolean;
       };
-      if (fmt.changed && !url.searchParams.has("readable")) {
-        const origLen = content.length;
-        const fmtLen = fmt.formatted.length;
-        if (fmtLen > origLen && (fmtLen - origLen) / origLen > 0.1) {
-          return new Response(
-            "Code appears minified. Minification does not help " +
-              "meet the size constraint — the server minifies " +
-              "before measuring. Write readable code with " +
-              "descriptive variable names and proper formatting.",
-            { status: 422 },
-          );
-        }
-      }
       content = fmt.formatted;
     } catch (e) {
       return new Response(
@@ -374,8 +353,8 @@ async function route(req: Request): Promise<Response> {
       );
     }
 
-    const gz = await gzipSize(minify(content));
-    db.insertAtom(hash, content, gz, "", undefined, "draft");
+    const tokens = countTokens(content);
+    db.insertAtom(hash, content, tokens, "", undefined, "draft");
 
     // Auto-register import relationships
     for (const dep of extractDependencies(content)) {
@@ -409,7 +388,7 @@ async function route(req: Request): Promise<Response> {
       return new Response("Missing source or targets", { status: 400 });
     }
 
-    const validationError = await validateAtom(body.source);
+    const validationError = validateAtom(body.source);
     if (validationError) {
       return new Response(validationError.message, { status: 422 });
     }
@@ -462,8 +441,15 @@ async function route(req: Request): Promise<Response> {
 
     // Store test as draft if not already
     if (!existingStatus) {
-      const gz = await gzipSize(minify(body.source));
-      db.insertAtom(hash, body.source, gz, testName ?? "", undefined, "draft");
+      const tokens = countTokens(body.source);
+      db.insertAtom(
+        hash,
+        body.source,
+        tokens,
+        testName ?? "",
+        undefined,
+        "draft",
+      );
       for (const dep of extractDependencies(body.source)) {
         db.insertRelationship(hash, "imports", dep);
       }
@@ -1009,6 +995,7 @@ async function route(req: Request): Promise<Response> {
           source: atom.source,
           description: atom.description,
           gzipSize: atom.gzipSize,
+          tokenCount: atom.gzipSize,
           goal: atom.goal,
           status: atom.status,
           createdAt: atom.createdAt,
