@@ -6,7 +6,13 @@ RUN npm install -g @anthropic-ai/claude-code
 FROM denoland/deno:latest
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git ca-certificates curl sudo procps && rm -rf /var/lib/apt/lists/*
+    git ca-certificates curl sudo procps \
+    jq tree ripgrep fd-find less file xxd \
+    python3 python3-pip \
+    openssh-client \
+    build-essential \
+    && ln -sf /usr/bin/fdfind /usr/bin/fd \
+    && rm -rf /var/lib/apt/lists/*
 
 # Apt proxy config (gateway resolved at runtime via Docker DNS)
 RUN echo 'Acquire::http::Proxy "http://gateway:3128";' > /etc/apt/apt.conf.d/proxy.conf
