@@ -2,17 +2,17 @@
 
 ## Problem
 
-The 100% branch coverage gate blocks publishing atoms with defensive throws
-for cases that can't be reached through valid inputs. Example: `inflate` has
-`else { throw new Error("invalid DEFLATE block type") }` for btype=3 which
-is invalid per RFC 1951. The code is correct but can't be tested through the
-public API without crafting corrupt input.
+The 100% branch coverage gate blocks publishing atoms with defensive throws for
+cases that can't be reached through valid inputs. Example: `inflate` has
+`else { throw new Error("invalid DEFLATE block type") }` for btype=3 which is
+invalid per RFC 1951. The code is correct but can't be tested through the public
+API without crafting corrupt input.
 
 ## Idea: built-in atoms
 
 Some special atoms could be baked into the project — populated on server
-startup, following the same rules (tested, published) but maintained as part
-of the codebase rather than built by agents.
+startup, following the same rules (tested, published) but maintained as part of
+the codebase rather than built by agents.
 
 One candidate: `assertUnreachable(msg: string): never`
 
