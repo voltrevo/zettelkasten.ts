@@ -1693,6 +1693,13 @@ async function cmdSize(rest: string[]): Promise<void> {
   console.log(
     `${size} bytes (min+gz) — ${status} ${MAX_GZIP_BYTES} byte limit`,
   );
+  if (size > MAX_GZIP_BYTES) {
+    console.error(
+      `Split into smaller atoms. Minification will not help — the ` +
+        `server minifies before measuring. Extract the most foundational ` +
+        `piece as a separate atom, then import it.`,
+    );
+  }
 }
 
 async function cmdRels(): Promise<void> {
