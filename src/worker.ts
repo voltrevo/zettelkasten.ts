@@ -381,63 +381,81 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       const enc = new TextEncoder();
       const dec = new TextDecoder();
       let buf = "";
-      for await (const chunk of child.stdout) {
-        await streamFile.write(chunk);
-        buf += dec.decode(chunk, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop()!;
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const obj = JSON.parse(line);
-            if (obj.type === "assistant" && obj.message?.content) {
-              Deno.stdout.writeSync(enc.encode("\n"));
-              for (const block of obj.message.content) {
-                if (block.type === "text" && block.text) {
-                  Deno.stdout.writeSync(enc.encode(block.text + "\n"));
-                }
-                if (block.type === "tool_use") {
-                  const input = block.input ?? {};
-                  if (block.name === "Bash" && input.command) {
-                    Deno.stdout.writeSync(
-                      enc.encode(`[$ ${input.command}]\n`),
-                    );
-                  } else if (block.name === "Write" && input.file_path) {
-                    Deno.stdout.writeSync(
-                      enc.encode(`[write: ${input.file_path}]\n`),
-                    );
-                  } else if (block.name === "Read" && input.file_path) {
-                    Deno.stdout.writeSync(
-                      enc.encode(`[read: ${input.file_path}]\n`),
-                    );
-                  } else if (block.name === "Edit" && input.file_path) {
-                    Deno.stdout.writeSync(
-                      enc.encode(`[edit: ${input.file_path}]\n`),
-                    );
-                  } else {
-                    Deno.stdout.writeSync(
-                      enc.encode(`[tool: ${block.name}]\n`),
-                    );
+      const reader = child.stdout.getReader();
+      let lastOutput = performance.now();
+      const silenceTimer = setInterval(() => {
+        const elapsed = Math.round((performance.now() - lastOutput) / 1000);
+        if (elapsed >= 10) {
+          Deno.stdout.writeSync(
+            enc.encode(`(no output for ${elapsed}s)\n`),
+          );
+        }
+      }, 10_000);
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          lastOutput = performance.now();
+          await streamFile.write(value);
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop()!;
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const obj = JSON.parse(line);
+              if (obj.type === "assistant" && obj.message?.content) {
+                Deno.stdout.writeSync(enc.encode("\n"));
+                for (const block of obj.message.content) {
+                  if (block.type === "text" && block.text) {
+                    Deno.stdout.writeSync(enc.encode(block.text + "\n"));
+                  }
+                  if (block.type === "tool_use") {
+                    const input = block.input ?? {};
+                    if (block.name === "Bash" && input.command) {
+                      Deno.stdout.writeSync(
+                        enc.encode(`[$ ${input.command}]\n`),
+                      );
+                    } else if (block.name === "Write" && input.file_path) {
+                      Deno.stdout.writeSync(
+                        enc.encode(`[write: ${input.file_path}]\n`),
+                      );
+                    } else if (block.name === "Read" && input.file_path) {
+                      Deno.stdout.writeSync(
+                        enc.encode(`[read: ${input.file_path}]\n`),
+                      );
+                    } else if (block.name === "Edit" && input.file_path) {
+                      Deno.stdout.writeSync(
+                        enc.encode(`[edit: ${input.file_path}]\n`),
+                      );
+                    } else {
+                      Deno.stdout.writeSync(
+                        enc.encode(`[tool: ${block.name}]\n`),
+                      );
+                    }
                   }
                 }
               }
-            }
-            if (obj.type === "user" && obj.message?.content) {
-              for (const block of obj.message.content) {
-                if (
-                  block.type === "tool_result" &&
-                  typeof block.content === "string"
-                ) {
-                  const text = block.content;
-                  const preview = text.length > 300
-                    ? text.slice(0, 300) + "..."
-                    : text;
-                  Deno.stdout.writeSync(enc.encode(`  → ${preview}\n`));
+              if (obj.type === "user" && obj.message?.content) {
+                for (const block of obj.message.content) {
+                  if (
+                    block.type === "tool_result" &&
+                    typeof block.content === "string"
+                  ) {
+                    const text = block.content;
+                    const preview = text.length > 300
+                      ? text.slice(0, 300) + "..."
+                      : text;
+                    Deno.stdout.writeSync(enc.encode(`  → ${preview}\n`));
+                  }
                 }
               }
-            }
-          } catch { /* skip */ }
+            } catch { /* skip */ }
+          }
         }
+      } finally {
+        clearInterval(silenceTimer);
       }
       Deno.stdout.writeSync(enc.encode("\n\n"));
       streamFile.close();
