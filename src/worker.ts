@@ -3,6 +3,8 @@
  * Summary promotion, prompt assembly, agent invocation, output capture.
  */
 
+import { createBearerClient } from "./api-client.ts";
+
 const RETROSPECTIVE_INTERVAL = 30;
 
 export interface WorkerConfig {
@@ -220,7 +222,22 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
   try {
     let iter = await readIteration(config);
 
+    const client = createBearerClient(config.serverUrl, {
+      dev: config.devToken,
+    });
+
     while (!stopping && (maxIters === 0 || iter < maxIters)) {
+      // Check for open goals before starting an iteration
+      try {
+        const goals = await client.listGoals();
+        if (goals.length === 0) {
+          console.log("[worker] No open goals, stopping.");
+          break;
+        }
+      } catch {
+        // Server unreachable — proceed anyway, agent will fail naturally
+      }
+
       iter++;
       const isRetrospective = iter > 0 && iter % RETROSPECTIVE_INTERVAL === 0;
       const mode = isRetrospective ? "retrospective" : "build";
