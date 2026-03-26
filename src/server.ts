@@ -1636,7 +1636,7 @@ async function route(req: Request): Promise<Response> {
         return new Response("Goal not found", { status: 404 });
       }
       const comments = db.getGoalComments(goalName);
-      const last = comments[comments.length - 1];
+      const last = comments[0]; // comments are ORDER BY id DESC, so [0] is most recent
       if (!last || !last.body.startsWith("DONE: ")) {
         return new Response(
           'Cannot mark done: the last comment must start with "DONE: " summarising how it was ' +
