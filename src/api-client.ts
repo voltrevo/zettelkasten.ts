@@ -637,9 +637,12 @@ function buildClient(
       if (!d || !base) {
         throw new Error("exec requires DenoCap and baseUrl");
       }
-      const atomUrl = `${base}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
-        hash.slice(4)
-      }.ts`;
+      // Resolve hash prefix to full hash
+      const info = await json<{ hash: string }>(`/info/${hash}`);
+      const fullHash = info.hash;
+      const atomUrl = `${base}/a/${fullHash.slice(0, 2)}/${
+        fullHash.slice(2, 4)
+      }/${fullHash.slice(4)}.ts`;
       const runTs = new URL("../run.ts", import.meta.url).pathname;
       const proc = new d.Command(d.execPath(), {
         args: ["run", "--allow-all", "--no-lock", runTs, ...scriptArgs],

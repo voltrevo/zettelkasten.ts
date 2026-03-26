@@ -555,7 +555,7 @@ switch (command) {
     break;
 
   case "exec":
-    await cmdExec(Deno.args.slice(1)); // use raw args to preserve numeric-looking strings
+    await cmdExec(rest);
     break;
 
   case "bundle":
