@@ -51,12 +51,6 @@ export async function setupWorkspace(config: WorkerConfig): Promise<void> {
   await Deno.writeTextFile(`${dir}/.iteration`, "0");
 
   await Deno.writeTextFile(
-    `${dir}/summary/current.md`,
-    `First iteration for channel "${config.channel}". No prior context.
-`,
-  );
-
-  await Deno.writeTextFile(
     `${dir}/notes/current.md`,
     `# Notes — ${config.channel}
 
@@ -66,7 +60,6 @@ carrying forward across iterations.
   );
 
   console.log(`Created workspace: ${dir}/`);
-  console.log("  summary/current.md");
   console.log("  notes/current.md");
   console.log("  retrospectives/");
   console.log("  logs/");
@@ -135,45 +128,144 @@ export async function writeIteration(
 }
 
 /** Fetch the active prompt from the server, or read from override file. */
-async function getPrompt(
-  name: string,
-  overrideFile: string | undefined,
-  serverUrl: string,
-): Promise<string> {
-  if (overrideFile) {
-    return await Deno.readTextFile(overrideFile);
-  }
-  const res = await fetch(`${serverUrl}/prompts/${name}`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch ${name} prompt: ${res.status}`);
-  }
-  return await res.text();
+/** Capability interface for prompt building — inject real I/O or test stubs. */
+export interface PromptCap {
+  readTextFile(path: string): Promise<string>;
+  readDir(path: string): AsyncIterable<{ name: string }>;
+  fetchPrompt(name: string): Promise<string>;
 }
 
-/** Get recent retrospective files for context. */
-async function getRecentRetrospectives(
-  dir: string,
-  count: number,
+export interface BuildPromptOpts {
+  rawPrompt: string;
+  serverUrl: string;
+  workspaceDir: string;
+  goalText: string;
+  iter: number;
+  channel: string;
+  isRetrospective: boolean;
+}
+
+/** Build the fully expanded prompt for an iteration. */
+export async function buildPrompt(
+  cap: PromptCap,
+  opts: BuildPromptOpts,
 ): Promise<string> {
-  const retroDir = `${dir}/retrospectives`;
-  const files: string[] = [];
+  const { serverUrl, workspaceDir, goalText, iter, channel, isRetrospective } =
+    opts;
+  const iterPad = String(iter).padStart(4, "0");
+
+  // Count summary history files
+  let historyCount = 0;
   try {
-    for await (const entry of Deno.readDir(retroDir)) {
-      if (entry.name.startsWith("retro-") && entry.name.endsWith(".md")) {
-        files.push(entry.name);
+    for await (const e of cap.readDir(`${workspaceDir}/summary/history`)) {
+      if (e.name.endsWith(".md")) historyCount++;
+    }
+  } catch { /* empty */ }
+  const summaryRef = historyCount > 0
+    ? `To this end, for your interest, historical summaries are available at` +
+      ` \`${workspaceDir}/summary/history/\` (${historyCount} files, named by iteration number).`
+    : "(First iteration — no prior summaries exist.)";
+
+  // Expand template variables
+  let prompt = opts.rawPrompt
+    .replace(/\{\{server-url\}\}/g, serverUrl)
+    .replace(/\{\{workspace\}\}/g, workspaceDir)
+    .replace(/\{\{summary\}\}/g, summaryRef)
+    .replace(/\{\{goal\}\}/g, goalText);
+
+  prompt += `\n\nCurrent iteration: ${iter}\nChannel: ${channel}\n`;
+  if (isRetrospective) {
+    prompt +=
+      `Write your retrospective to: retrospectives/retro-${iterPad}.md\n`;
+  }
+
+  // Build retrospective context
+  if (isRetrospective) {
+    let retroCtx = "";
+
+    // Recent summaries
+    const historyFiles: string[] = [];
+    try {
+      for await (
+        const entry of cap.readDir(`${workspaceDir}/summary/history`)
+      ) {
+        if (entry.name.endsWith(".md")) historyFiles.push(entry.name);
+      }
+    } catch { /* no history */ }
+    historyFiles.sort((a, b) => parseInt(a) - parseInt(b));
+    const recentHistory = historyFiles.slice(-30);
+    if (recentHistory.length > 0) {
+      retroCtx += "# Recent summary history\n\n";
+      for (const f of recentHistory) {
+        const content = await cap.readTextFile(
+          `${workspaceDir}/summary/history/${f}`,
+        );
+        retroCtx += `--- iteration ${f.replace(".md", "")} ---\n${content}\n\n`;
       }
     }
-  } catch {
-    return "";
+
+    // Past retrospectives
+    const retroFiles: string[] = [];
+    try {
+      for await (const entry of cap.readDir(`${workspaceDir}/retrospectives`)) {
+        if (entry.name.startsWith("retro-") && entry.name.endsWith(".md")) {
+          retroFiles.push(entry.name);
+        }
+      }
+    } catch { /* none */ }
+    retroFiles.sort().reverse();
+    const recentRetros = retroFiles.slice(0, 3).reverse();
+    if (recentRetros.length > 0) {
+      const parts: string[] = [];
+      for (const f of recentRetros) {
+        const content = await cap.readTextFile(
+          `${workspaceDir}/retrospectives/${f}`,
+        );
+        parts.push(`--- ${f} ---\n${content}`);
+      }
+      retroCtx += "\n# Recent retrospectives\n\n" + parts.join("\n\n");
+    }
+
+    prompt = prompt.replace(
+      /\{\{retrospective-context\}\}/g,
+      retroCtx || "(No prior context available.)",
+    );
   }
-  files.sort().reverse();
-  const recent = files.slice(0, count);
-  const parts: string[] = [];
-  for (const f of recent.reverse()) {
-    const content = await Deno.readTextFile(`${retroDir}/${f}`);
-    parts.push(`--- ${f} ---\n${content}`);
+
+  return prompt;
+}
+
+/** Build the goal text for inlining into the prompt. */
+export function formatGoalText(
+  goal: {
+    name: string;
+    weight: number;
+    body: string | null;
+    hasFiles?: boolean;
+  },
+): string {
+  let text = `**${goal.name}** (weight ${goal.weight})\n\n${goal.body ?? ""}`;
+  if (goal.hasFiles) {
+    text += "\n\n*This is a directory goal with additional files." +
+      ` Use \`zts goal files ${goal.name}\` to list them` +
+      ` and \`zts goal file ${goal.name} <path>\` to read specific sections.*`;
   }
-  return parts.join("\n\n");
+  return text;
+}
+
+/** Real PromptCap backed by Deno I/O and server fetch. */
+function realPromptCap(serverUrl: string): PromptCap {
+  return {
+    readTextFile: (p) => Deno.readTextFile(p),
+    readDir: (p) => Deno.readDir(p),
+    fetchPrompt: async (name) => {
+      const res = await fetch(`${serverUrl}/prompts/${name}`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch ${name} prompt: ${res.status}`);
+      }
+      return res.text();
+    },
+  };
 }
 
 /** Run the agent loop. */
@@ -182,7 +274,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
 
   // Verify workspace exists
   try {
-    await Deno.stat(`${dir}/summary/current.md`);
+    await Deno.stat(`${dir}/summary`);
   } catch {
     console.error(
       `error: workspace not found at ${dir}. Run: zts worker setup --channel ${config.channel}`,
@@ -227,13 +319,29 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
     });
 
     while (!stopping && (maxIters === 0 || iter < maxIters)) {
-      // Check for open goals before starting an iteration
+      // Pick a goal for this iteration
+      let goalText = "(No open goals)";
+      let goalName = "";
       try {
         const goals = await client.listGoals();
         if (goals.length === 0) {
           console.log("[worker] No open goals, stopping.");
           break;
         }
+        // Weighted random pick
+        const totalWeight = goals.reduce((s, g) => s + g.weight, 0);
+        let r = Math.random() * totalWeight;
+        let picked = goals[0];
+        for (const g of goals) {
+          r -= g.weight;
+          if (r <= 0) {
+            picked = g;
+            break;
+          }
+        }
+        goalName = picked.name;
+        const detail = await client.getGoal(goalName);
+        goalText = formatGoalText(detail);
       } catch {
         // Server unreachable — proceed anyway, agent will fail naturally
       }
@@ -256,90 +364,32 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         await new Deno.Command("stty", { args: ["sane"], stdin: "inherit" })
           .output();
       } catch { /* not a TTY or stty unavailable */ }
-      console.log(`[iter ${iter}] ${mode}`);
-
-      // Fetch prompt
-      const rawPrompt = await getPrompt(
-        isRetrospective ? "retrospective" : "prompt",
-        isRetrospective ? config.retrospectivePromptFile : config.promptFile,
-        config.serverUrl,
+      console.log(
+        `[iter ${iter}] ${mode}${goalName ? ` — goal: ${goalName}` : ""}`,
       );
 
-      // Read summary
-      let summary = "";
-      try {
-        summary = await Deno.readTextFile(`${dir}/summary/current.md`);
-      } catch { /* first run or missing */ }
+      // Fetch raw prompt template
+      const promptName = isRetrospective ? "retrospective" : "prompt";
+      const overrideFile = isRetrospective
+        ? config.retrospectivePromptFile
+        : config.promptFile;
+      const pCap = realPromptCap(config.serverUrl);
+      const rawPrompt = overrideFile
+        ? await pCap.readTextFile(overrideFile)
+        : await pCap.fetchPrompt(promptName);
 
-      // Expand template variables
-      const iterPad = String(iter).padStart(4, "0");
-      let prompt = rawPrompt
-        .replace(/\{\{server-url\}\}/g, config.serverUrl)
-        .replace(
-          /\{\{workspace\}\}/g,
-          dir.startsWith("/") ? dir : `${Deno.cwd()}/${dir}`,
-        )
-        .replace(
-          /\{\{summary\}\}/g,
-          summary || "(First iteration — no previous summary.)",
-        )
-        .replace(
-          /\{\{goal\}\}/g,
-          "(Goal will be selected by the agent via zts goal pick)",
-        );
-      // {{cli-help}} is expanded lazily — TODO: capture zts -h output
-      prompt += `\n\nCurrent iteration: ${iter}\nChannel: ${config.channel}\n`;
-      if (isRetrospective) {
-        prompt +=
-          `Write your retrospective to: retrospectives/retro-${iterPad}.md\n`;
-      }
+      const absDir = dir.startsWith("/") ? dir : `${Deno.cwd()}/${dir}`;
 
-      // Add context for retrospective mode
-      if (isRetrospective) {
-        // Include recent summary history so the agent doesn't waste turns reading files
-        const historyDir = `${dir}/summary/history`;
-        const historyFiles: string[] = [];
-        try {
-          for await (const entry of Deno.readDir(historyDir)) {
-            if (entry.name.endsWith(".md")) historyFiles.push(entry.name);
-          }
-        } catch { /* no history */ }
-        historyFiles.sort((a, b) => {
-          const na = parseInt(a);
-          const nb = parseInt(b);
-          return na - nb;
-        });
-        // Include last 30 summaries
-        const recentHistory = historyFiles.slice(-30);
-        if (recentHistory.length > 0) {
-          prompt += "\n\n---\n\n# Recent summary history\n\n";
-          for (const f of recentHistory) {
-            const content = await Deno.readTextFile(`${historyDir}/${f}`);
-            prompt += `--- iteration ${
-              f.replace(".md", "")
-            } ---\n${content}\n\n`;
-          }
-        }
-
-        // Include recent retrospectives
-        const retroContext = await getRecentRetrospectives(dir, 3);
-        if (retroContext) {
-          prompt += "\n\n---\n\n# Recent retrospectives\n\n" + retroContext;
-        }
-      }
-
-      // Snapshot current summary to history
-      if (summary) {
-        await Deno.writeTextFile(
-          `${dir}/summary/history/${iter}.md`,
-          summary,
-        );
-      }
-
-      // Remove next.md so we can detect if agent wrote it
-      try {
-        await Deno.remove(`${dir}/summary/next.md`);
-      } catch { /* didn't exist */ }
+      // Build the fully expanded prompt
+      const prompt = await buildPrompt(pCap, {
+        rawPrompt,
+        serverUrl: config.serverUrl,
+        workspaceDir: absDir,
+        goalText,
+        iter,
+        channel: config.channel,
+        isRetrospective,
+      });
 
       // Create log dir for this iteration
       const iterLogDir = `${dir}/logs/iter-${String(iter).padStart(4, "0")}`;
@@ -483,14 +533,15 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         `[iter ${iter}] exit ${code} (${durationSec}s)`,
       );
 
-      // Promote summary
+      // Move tmp.md → history/<iter>.md
       try {
-        const next = await Deno.readTextFile(`${dir}/summary/next.md`);
-        await Deno.writeTextFile(`${dir}/summary/current.md`, next);
-        await Deno.remove(`${dir}/summary/next.md`);
+        await Deno.rename(
+          `${dir}/summary/tmp.md`,
+          `${dir}/summary/history/${iter}.md`,
+        );
       } catch {
         console.warn(
-          `[iter ${iter}] WARNING: agent did not write summary/next.md`,
+          `[iter ${iter}] WARNING: agent did not write summary/tmp.md`,
         );
       }
 

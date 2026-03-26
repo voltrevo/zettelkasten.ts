@@ -1,6 +1,7 @@
 import { Database } from "@db/sqlite";
+import { parseZip } from "./bundle.ts";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS goals (
   weight     REAL NOT NULL DEFAULT 0.5,
   done       INTEGER NOT NULL DEFAULT 0,
   body       TEXT NOT NULL DEFAULT '',
+  files      BLOB,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -176,6 +178,7 @@ export interface Goal {
   weight: number;
   done: boolean;
   body: string;
+  files: Uint8Array | null;
   createdAt: string;
 }
 
@@ -322,6 +325,13 @@ export class Db {
       this.db.exec("PRAGMA foreign_keys=ON");
       this.db.prepare("UPDATE schema_version SET version = ?").run(4);
       console.log("Schema v4 migration complete.");
+    }
+    if (fromVersion < 5) {
+      // v4→v5: add files BLOB column to goals for directory-based goals
+      console.log("Migrating schema v4 → v5...");
+      this.db.exec("ALTER TABLE goals ADD COLUMN files BLOB");
+      this.db.prepare("UPDATE schema_version SET version = ?").run(5);
+      console.log("Schema v5 migration complete.");
     }
   }
 
@@ -991,6 +1001,7 @@ export class Db {
     weight: number;
     done: number;
     body: string;
+    files: Uint8Array | null;
     created_at: string;
   }): Goal {
     return {
@@ -999,6 +1010,7 @@ export class Db {
       weight: r.weight,
       done: r.done === 1,
       body: r.body,
+      files: r.files,
       createdAt: r.created_at,
     };
   }
@@ -1007,22 +1019,39 @@ export class Db {
     name: string,
     weight: number = 0.5,
     body: string = "",
+    files?: Uint8Array,
   ): Goal {
-    this.db.prepare(
-      "INSERT INTO goals (name, weight, body) VALUES (?, ?, ?)",
-    ).run(name, weight, body);
+    if (files) {
+      const readme = this.extractReadme(files);
+      this.db.prepare(
+        "INSERT INTO goals (name, weight, body, files) VALUES (?, ?, ?, ?)",
+      ).run(name, weight, readme, files);
+    } else {
+      this.db.prepare(
+        "INSERT INTO goals (name, weight, body) VALUES (?, ?, ?)",
+      ).run(name, weight, body);
+    }
     return this.getGoal(name)!;
+  }
+
+  private extractReadme(files: Uint8Array): string {
+    const dec = new TextDecoder();
+    const zip = parseZip(files);
+    const readme = zip.get("README.md");
+    if (!readme) throw new Error("directory goal must contain README.md");
+    return dec.decode(readme);
   }
 
   getGoal(name: string): Goal | null {
     const row = this.db.prepare(
-      "SELECT id, name, weight, done, body, created_at FROM goals WHERE name = ?",
+      "SELECT id, name, weight, done, body, files, created_at FROM goals WHERE name = ?",
     ).get<{
       id: number;
       name: string;
       weight: number;
       done: number;
       body: string;
+      files: Uint8Array | null;
       created_at: string;
     }>(name);
     if (!row) return null;
@@ -1033,7 +1062,8 @@ export class Db {
     done?: boolean;
     all?: boolean;
   } = {}): Goal[] {
-    let sql = "SELECT id, name, weight, done, body, created_at FROM goals";
+    let sql =
+      "SELECT id, name, weight, done, body, files, created_at FROM goals";
     if (!opts.all) {
       if (opts.done) {
         sql += " WHERE done = 1";
@@ -1048,6 +1078,7 @@ export class Db {
       weight: number;
       done: number;
       body: string;
+      files: Uint8Array | null;
       created_at: string;
     }>().map((r) => this.rowToGoal(r));
   }
@@ -1084,15 +1115,21 @@ export class Db {
 
   updateGoal(
     name: string,
-    updates: { weight?: number; body?: string },
+    updates: { weight?: number; body?: string; files?: Uint8Array },
   ): boolean {
     const sets: string[] = [];
-    const params: (string | number)[] = [];
+    const params: (string | number | Uint8Array)[] = [];
     if (updates.weight !== undefined) {
       sets.push("weight = ?");
       params.push(updates.weight);
     }
-    if (updates.body !== undefined) {
+    if (updates.files !== undefined) {
+      const readme = this.extractReadme(updates.files);
+      sets.push("files = ?");
+      params.push(updates.files);
+      sets.push("body = ?");
+      params.push(readme);
+    } else if (updates.body !== undefined) {
       sets.push("body = ?");
       params.push(updates.body);
     }
@@ -1152,6 +1189,23 @@ export class Db {
         createdAt: r.created_at,
       }),
     );
+  }
+
+  getGoalFiles(name: string): string[] | null {
+    const goal = this.getGoal(name);
+    if (!goal?.files) return null;
+    const zip = parseZip(goal.files);
+    return [...zip.keys()].sort();
+  }
+
+  getGoalFile(name: string, path: string): string | null {
+    const goal = this.getGoal(name);
+    if (!goal?.files) return null;
+    const dec = new TextDecoder();
+    const zip = parseZip(goal.files);
+    const file = zip.get(path);
+    if (!file) return null;
+    return dec.decode(file);
   }
 
   deleteGoalComment(id: number): boolean {

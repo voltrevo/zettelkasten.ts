@@ -365,15 +365,13 @@ practice but not required.
 
 ### 5. Write your summary
 
-Write your summary to `{{workspace}}/summary/next.md`. The system reads and
-deletes this file between iterations — it will be presented to the next
-iteration as context.
+Write your summary to `{{workspace}}/summary/tmp.md`. The system moves this file
+to `summary/history/<iter>.md` after each iteration.
 
 Include:
 
 - What you built (hash + description), or what you tried and why it failed
 - Why you're confident it's correct (what do the tests prove?)
-- What's the most useful next atom for this goal?
 
 Example:
 
@@ -390,11 +388,9 @@ This summary is context for future iterations, not a contract. The next agent is
 not obligated to follow your plan — they'll make their own decision. But your
 observations and confidence argument are valuable input.
 
----
-
-## What happened last time
-
 {{summary}}
+
+---
 
 ## Your goal
 

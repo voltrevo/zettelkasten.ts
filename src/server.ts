@@ -1526,6 +1526,8 @@ async function route(req: Request): Promise<Response> {
     const counts = db.goalAtomCounts();
     const withCounts = goals.map((g) => ({
       ...g,
+      files: undefined, // don't send blob in list
+      hasFiles: g.files !== null,
       atomCount: counts.get(g.name) ?? 0,
     }));
     return new Response(JSON.stringify(withCounts), {
@@ -1540,8 +1542,46 @@ async function route(req: Request): Promise<Response> {
       const goal = db.getGoal(goalMatch[1]);
       if (!goal) return new Response("Goal not found", { status: 404 });
       const comments = db.getGoalComments(goal.name);
-      return new Response(JSON.stringify({ ...goal, comments }), {
+      return new Response(
+        JSON.stringify({
+          ...goal,
+          files: undefined,
+          hasFiles: goal.files !== null,
+          comments,
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    }
+  }
+
+  // GET /goals/<name>/files — list files in directory goal
+  if (req.method === "GET") {
+    const filesListMatch = path.match(
+      /^\/goals\/([a-zA-Z0-9_-]+)\/files$/,
+    );
+    if (filesListMatch) {
+      const files = db.getGoalFiles(filesListMatch[1]);
+      if (files === null) {
+        return new Response("Goal not found or has no files", { status: 404 });
+      }
+      return new Response(JSON.stringify(files), {
         headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
+  // GET /goals/<name>/files/<path...> — read a single file from directory goal
+  if (req.method === "GET") {
+    const fileMatch = path.match(
+      /^\/goals\/([a-zA-Z0-9_-]+)\/files\/(.+)$/,
+    );
+    if (fileMatch) {
+      const content = db.getGoalFile(fileMatch[1], fileMatch[2]);
+      if (content === null) {
+        return new Response("File not found", { status: 404 });
+      }
+      return new Response(content, {
+        headers: { "content-type": "text/markdown; charset=utf-8" },
       });
     }
   }
@@ -1565,7 +1605,12 @@ async function route(req: Request): Promise<Response> {
   if (req.method === "POST" && path === "/goals") {
     const authErr = requireAuth(req, "admin");
     if (authErr) return authErr;
-    let body: { name?: string; weight?: number; body?: string };
+    let body: {
+      name?: string;
+      weight?: number;
+      body?: string;
+      files?: string;
+    };
     try {
       body = await req.json();
     } catch {
@@ -1577,7 +1622,15 @@ async function route(req: Request): Promise<Response> {
     if (db.goalExists(body.name)) {
       return new Response("Goal already exists", { status: 409 });
     }
-    const goal = db.createGoal(body.name, body.weight, body.body);
+    const filesBlob = body.files
+      ? Uint8Array.from(atob(body.files), (c) => c.charCodeAt(0))
+      : undefined;
+    const goal = db.createGoal(
+      body.name,
+      body.weight,
+      body.body,
+      filesBlob,
+    );
     db.insertLog({
       op: "goal.create",
       subject: goal.name,
@@ -1595,13 +1648,21 @@ async function route(req: Request): Promise<Response> {
     if (goalMatch) {
       const authErr = requireAuth(req, "admin");
       if (authErr) return authErr;
-      let body: { weight?: number; body?: string };
+      let body: { weight?: number; body?: string; files?: string };
       try {
         body = await req.json();
       } catch {
         return new Response("Invalid JSON", { status: 400 });
       }
-      if (!db.updateGoal(goalMatch[1], body)) {
+      const updateOpts: { weight?: number; body?: string; files?: Uint8Array } =
+        { weight: body.weight, body: body.body };
+      if (body.files) {
+        updateOpts.files = Uint8Array.from(
+          atob(body.files),
+          (c) => c.charCodeAt(0),
+        );
+      }
+      if (!db.updateGoal(goalMatch[1], updateOpts)) {
         return new Response("Goal not found", { status: 404 });
       }
       db.insertLog({ op: "goal.update", subject: goalMatch[1] });

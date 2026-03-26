@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { parseZip } from "./src/bundle.ts";
+import { buildZip, parseZip } from "./src/bundle.ts";
 import { countTokens, MAX_TOKENS } from "./src/validate.ts";
 import { serve } from "./src/server.ts";
 import { serveChecker } from "./src/checker.ts";
@@ -53,6 +53,7 @@ const args = parseArgs(Deno.args, {
     "targets",
     "prompt-file",
     "retrospective-prompt",
+    "dir",
   ],
   boolean: [
     "f",
@@ -273,13 +274,18 @@ zts goal list [--done] [--all]        list goals
 zts goal done <name>                  mark complete (last comment must start with "DONE:")
 zts goal undone <name>                revert completion
 zts goal comment <name> <text>        append observation
-zts goal comments <name> [--recent N] read observations`,
+zts goal comments <name> [--recent N] read observations
+zts goal files <name>                 list files in directory goal
+zts goal file <name> <path>           read a single goal file`,
 
-  admin: `zts admin goal add <name> [--weight N] [--body <text>]
-  Create a goal. Requires ZTS_ADMIN_TOKEN.
+  admin: `zts admin goal add <name> [--weight N] [--body <text>] [--dir <path>]
+  Create a goal. --dir uploads a directory as a linked markdown goal.
 
-zts admin goal set <name> [--weight N] [--body <text>]
-  Update a goal's weight or body.
+zts admin goal set <name> [--weight N] [--body <text>] [--dir <path>]
+  Update a goal's weight, body, or files. --dir replaces files.
+
+zts admin goal get <name> --dir <path>
+  Extract a directory goal's files to disk.
 
 zts admin goal delete <name>
   Delete a goal and all its comments.`,
@@ -738,12 +744,16 @@ Goals:
   goal comment <name> <text>   append observation
   goal comments <name> [--recent N]
                                read observations
+  goal files <name>            list files in directory goal
+  goal file <name> <path>      read a single goal file
 
 Admin:
-  admin goal add <name> [--weight N] [--body <text>]
+  admin goal add <name> [--weight N] [--body <text>] [--dir <path>]
                                create goal
-  admin goal set <name> [--weight N] [--body <text>]
+  admin goal set <name> [--weight N] [--body <text>] [--dir <path>]
                                update goal
+  admin goal get <name> --dir <path>
+                               extract directory goal to disk
   admin goal delete <name>     delete goal
 
 Status & logs:
@@ -1436,12 +1446,67 @@ async function cmdGoal(rest: string[]): Promise<void> {
       }
       throw e;
     }
+  } else if (sub === "files") {
+    const name = rest[1];
+    if (!name) {
+      console.error("usage: zts goal files <name>");
+      Deno.exit(1);
+    }
+    try {
+      const files = await client.goalFiles(name);
+      for (const f of files) console.log(f);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
+    }
+  } else if (sub === "file") {
+    const name = rest[1];
+    const path = rest[2];
+    if (!name || !path) {
+      console.error("usage: zts goal file <name> <path>");
+      Deno.exit(1);
+    }
+    try {
+      const content = await client.goalFile(name, path);
+      console.log(content);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
+    }
   } else {
     console.error(
-      "usage: zts goal <pick|show|list|done|undone|comment|comments> ...",
+      "usage: zts goal <pick|show|list|done|undone|comment|comments|files|file> ...",
     );
     Deno.exit(1);
   }
+}
+
+async function readDirToZip(dirPath: string): Promise<Uint8Array> {
+  const enc = new TextEncoder();
+  const files = new Map<string, Uint8Array>();
+  async function walk(dir: string, prefix: string) {
+    for await (const entry of Deno.readDir(dir)) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory) {
+        await walk(`${dir}/${entry.name}`, rel);
+      } else if (entry.isFile) {
+        const content = await Deno.readTextFile(`${dir}/${entry.name}`);
+        files.set(rel, enc.encode(content));
+      }
+    }
+  }
+  await walk(dirPath, "");
+  if (!files.has("README.md")) {
+    console.error("error: directory goal must contain README.md");
+    Deno.exit(1);
+  }
+  return buildZip(files);
 }
 
 async function cmdAdmin(rest: string[]): Promise<void> {
@@ -1455,14 +1520,20 @@ async function cmdAdmin(rest: string[]): Promise<void> {
     const name = rest[2];
     if (!name) {
       console.error(
-        'usage: zts admin goal add <name> [--weight N] [--body "text"]',
+        'usage: zts admin goal add <name> [--weight N] [--body "text"] [--dir <path>]',
       );
       Deno.exit(1);
     }
+    if (args.dir && args.body) {
+      console.error("error: --dir and --body are mutually exclusive");
+      Deno.exit(1);
+    }
     try {
+      const filesZip = args.dir ? await readDirToZip(args.dir) : undefined;
       const goal = await client.createGoal(name, {
         weight: args.weight ? parseFloat(args.weight) : undefined,
         body: args.body,
+        files: filesZip,
       });
       console.log(`created: ${goal.name} (weight ${goal.weight})`);
     } catch (e) {
@@ -1476,16 +1547,47 @@ async function cmdAdmin(rest: string[]): Promise<void> {
     const name = rest[2];
     if (!name) {
       console.error(
-        'usage: zts admin goal set <name> [--weight N] [--body "text"]',
+        'usage: zts admin goal set <name> [--weight N] [--body "text"] [--dir <path>]',
       );
       Deno.exit(1);
     }
+    if (args.dir && args.body) {
+      console.error("error: --dir and --body are mutually exclusive");
+      Deno.exit(1);
+    }
     try {
+      const filesZip = args.dir ? await readDirToZip(args.dir) : undefined;
       await client.updateGoal(name, {
         weight: args.weight ? parseFloat(args.weight) : undefined,
         body: args.body,
+        files: filesZip,
       });
       console.log("ok");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
+    }
+  } else if (sub === "get") {
+    const name = rest[2];
+    const dir = args.dir;
+    if (!name || !dir) {
+      console.error("usage: zts admin goal get <name> --dir <path>");
+      Deno.exit(1);
+    }
+    try {
+      const files = await client.goalFiles(name);
+      await Deno.mkdir(dir, { recursive: true });
+      for (const f of files) {
+        const content = await client.goalFile(name, f);
+        const fullPath = `${dir}/${f}`;
+        const parent = fullPath.replace(/\/[^/]+$/, "");
+        await Deno.mkdir(parent, { recursive: true });
+        await Deno.writeTextFile(fullPath, content);
+      }
+      console.log(`extracted ${files.length} file(s) to ${dir}`);
     } catch (e) {
       if (e instanceof ApiError) {
         console.error(`error: ${e.status} ${e.message}`);
@@ -1510,7 +1612,7 @@ async function cmdAdmin(rest: string[]): Promise<void> {
       throw e;
     }
   } else {
-    console.error("usage: zts admin goal <add|set|delete> ...");
+    console.error("usage: zts admin goal <add|set|get|delete> ...");
     Deno.exit(1);
   }
 }

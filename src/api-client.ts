@@ -129,6 +129,7 @@ export interface Goal {
   weight: number;
   body: string | null;
   done: boolean;
+  hasFiles?: boolean;
   atomCount?: number;
 }
 
@@ -265,11 +266,11 @@ export interface ZtsClient {
   getGoal(name: string): Promise<GoalDetail>;
   createGoal(
     name: string,
-    opts?: { weight?: number; body?: string },
+    opts?: { weight?: number; body?: string; files?: Uint8Array },
   ): Promise<Goal>;
   updateGoal(
     name: string,
-    opts: { weight?: number; body?: string },
+    opts: { weight?: number; body?: string; files?: Uint8Array },
   ): Promise<void>;
   deleteGoal(name: string): Promise<void>;
   markGoalDone(name: string): Promise<void>;
@@ -280,6 +281,8 @@ export interface ZtsClient {
     opts?: { recent?: number },
   ): Promise<GoalComment[]>;
   deleteGoalComment(name: string, id: number): Promise<void>;
+  goalFiles(name: string): Promise<string[]>;
+  goalFile(name: string, path: string): Promise<string>;
 
   // Prompts
   getPrompt(name: string, defaultOnly?: boolean): Promise<PromptResult>;
@@ -316,6 +319,12 @@ interface Transport {
 }
 
 // ---- Implementation ----
+
+function u8ToBase64(data: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < data.length; i++) bin += String.fromCharCode(data[i]);
+  return btoa(bin);
+}
 
 function buildClient(
   transport: Transport,
@@ -546,19 +555,36 @@ function buildClient(
 
     getGoal: (name) => json(`/goals/${encodeURIComponent(name)}`),
 
-    createGoal: (name, opts = {}) =>
-      json("/goals", {
+    createGoal: (name, opts = {}) => {
+      const payload: Record<string, unknown> = {
+        name,
+        weight: opts.weight,
+        body: opts.body,
+      };
+      if (opts.files) {
+        payload.files = u8ToBase64(opts.files);
+      }
+      return json("/goals", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, weight: opts.weight, body: opts.body }),
-      }),
+        body: JSON.stringify(payload),
+      });
+    },
 
-    updateGoal: (name, opts) =>
-      ok(`/goals/${encodeURIComponent(name)}`, {
+    updateGoal: (name, opts) => {
+      const payload: Record<string, unknown> = {
+        weight: opts.weight,
+        body: opts.body,
+      };
+      if (opts.files) {
+        payload.files = u8ToBase64(opts.files);
+      }
+      return ok(`/goals/${encodeURIComponent(name)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(opts),
-      }),
+        body: JSON.stringify(payload),
+      });
+    },
 
     deleteGoal: (name) =>
       ok(`/goals/${encodeURIComponent(name)}`, { method: "DELETE" }),
@@ -587,6 +613,16 @@ function buildClient(
       ok(`/goals/${encodeURIComponent(name)}/comments/${id}`, {
         method: "DELETE",
       }),
+
+    goalFiles: (name) => json(`/goals/${encodeURIComponent(name)}/files`),
+
+    goalFile: async (name, path) => {
+      const res = await transport.fetch(
+        `/goals/${encodeURIComponent(name)}/files/${path}`,
+      );
+      if (!res.ok) throw new ApiError(res.status, await res.text());
+      return res.text();
+    },
 
     // Prompts
     async getPrompt(name, defaultOnly) {

@@ -498,6 +498,71 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(undone.done, false);
     });
 
+    await timed(
+      t,
+      "directory goal: create, list files, read file",
+      async () => {
+        const enc = new TextEncoder();
+        const { buildZip } = await import("./bundle.ts");
+        const files = new Map<string, Uint8Array>();
+        files.set(
+          "README.md",
+          enc.encode("# Dir Goal\n- [detail.md](detail.md)"),
+        );
+        files.set("detail.md", enc.encode("## Detail\nSome content."));
+        files.set("sub/nested.md", enc.encode("## Nested\nDeep file."));
+        const zip = buildZip(files);
+
+        const g = await client.createGoal("dir-goal", {
+          weight: 1,
+          files: zip,
+        });
+        assertEquals(g.name, "dir-goal");
+        // body should be README.md content
+        assertEquals(g.body, "# Dir Goal\n- [detail.md](detail.md)");
+
+        const detail = await client.getGoal("dir-goal");
+        assertEquals(detail.hasFiles, true);
+
+        const fileList = await client.goalFiles("dir-goal");
+        assertEquals(fileList.includes("README.md"), true);
+        assertEquals(fileList.includes("detail.md"), true);
+        assertEquals(fileList.includes("sub/nested.md"), true);
+
+        const content = await client.goalFile("dir-goal", "detail.md");
+        assertEquals(content, "## Detail\nSome content.");
+
+        const nested = await client.goalFile("dir-goal", "sub/nested.md");
+        assertEquals(nested, "## Nested\nDeep file.");
+
+        // Update with new files
+        const files2 = new Map<string, Uint8Array>();
+        files2.set("README.md", enc.encode("# Updated"));
+        files2.set("new.md", enc.encode("## New file"));
+        await client.updateGoal("dir-goal", { files: buildZip(files2) });
+
+        const updated = await client.getGoal("dir-goal");
+        assertEquals(updated.body, "# Updated");
+        const updatedFiles = await client.goalFiles("dir-goal");
+        assertEquals(updatedFiles.includes("new.md"), true);
+        assertEquals(updatedFiles.includes("detail.md"), false);
+
+        // 404 for missing file
+        await assertRejects(
+          () => client.goalFile("dir-goal", "nonexistent.md"),
+          ApiError,
+        );
+
+        // Non-directory goal has no files
+        await assertRejects(
+          () => client.goalFiles("test-goal"),
+          ApiError,
+        );
+
+        await client.deleteGoal("dir-goal");
+      },
+    );
+
     await timed(t, "prompts: get, set, reset", async () => {
       const def = await client.getPrompt("prompt");
       log("default prompt source:", def.source, "length:", def.text.length);
