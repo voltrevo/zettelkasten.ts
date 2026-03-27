@@ -205,6 +205,15 @@ behavior. If the goal has tags:
     run(target: ...): void { ... }
   }
   ```
+- **The test must actually verify the behavior described by the tag.** A tag
+  that says "error at line 4" requires the test to assert the line number is 4,
+  not just that an error occurred. A weaker test that doesn't verify what the
+  tag describes is worse than no test — it gives false confidence. If you can't
+  write a test that verifies the full requirement, leave the tag uncovered and
+  explain why in your summary.
+- If a spec requirement can't be met because a dependency has a bug, fix the
+  dependency. Use `--supersedes` to build a corrected version. Just because
+  you didn't write the broken atom doesn't mean you shouldn't fix it.
 - Check coverage with `zts goal coverage <goal> --entries <hash1>,<hash2>,...`
   to see which tags your dependency tree covers vs which are missing.
 - Some tags describe behavior that can only be verified interactively (e.g. real
@@ -219,7 +228,7 @@ applies — write tests as usual.
 
 Each iteration, you build ONE well-tested atom that advances your goal — or you
 build nothing and explain why. It is always better to build nothing than to
-build something you aren't confident in.
+build something that might be wrong.
 
 "One atom" means one value atom plus as many test atoms as needed to cover it
 thoroughly. Tests don't count toward the one — they're part of building it well.
