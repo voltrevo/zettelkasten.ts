@@ -270,6 +270,56 @@ function realPromptCap(serverUrl: string): PromptCap {
 }
 
 /** Run the agent loop. */
+// --- Pretty-print helpers for stream output ---
+
+const C = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  yellow: "\x1b[33m",
+  green: "\x1b[32m",
+  red: "\x1b[31m",
+  cyan: "\x1b[36m",
+  gray: "\x1b[90m",
+};
+
+function midTrunc(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const half = Math.floor((max - 3) / 2);
+  return s.slice(0, half) + "..." + s.slice(s.length - half);
+}
+
+function createPrettyEmitter(prettyPath: string) {
+  const enc = new TextEncoder();
+  function emit(s: string) {
+    Deno.stdout.writeSync(enc.encode(s));
+    Deno.writeFileSync(prettyPath, enc.encode(s), { append: true });
+  }
+  function emitLn(s: string) {
+    emit(s + "\n");
+  }
+  function emitResult(content: string, isError: boolean) {
+    const color = isError ? C.red : C.gray;
+    const lines = content.split("\n");
+    if (lines.length > 10) {
+      for (const l of lines.slice(0, 2)) {
+        emitLn(`  ${color}→ ${midTrunc(l, 120)}${C.reset}`);
+      }
+      emitLn(
+        `  ${color}  ... ${lines.length - 4} more lines ...${C.reset}`,
+      );
+      for (const l of lines.slice(-2)) {
+        emitLn(`  ${color}→ ${midTrunc(l, 120)}${C.reset}`);
+      }
+    } else {
+      for (const l of lines) {
+        emitLn(`  ${color}→ ${midTrunc(l, 120)}${C.reset}`);
+      }
+    }
+  }
+  return { emit, emitLn, emitResult };
+}
+
 export async function runWorker(config: WorkerConfig): Promise<void> {
   const dir = channelDir(config);
 
@@ -459,6 +509,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
 
       const start = performance.now();
       const streamPath = `${iterLogDir}/stream.jsonl`;
+      const prettyPath = `${iterLogDir}/pretty.log`;
       const streamFile = await Deno.open(streamPath, {
         write: true,
         create: true,
@@ -466,15 +517,16 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       });
       const enc = new TextEncoder();
       const dec = new TextDecoder();
+
+      const { emitLn, emitResult } = createPrettyEmitter(prettyPath);
       let buf = "";
       const reader = child.stdout.getReader();
       let lastOutput = performance.now();
+      let lastWasTool = false;
       const silenceTimer = setInterval(() => {
         const elapsed = Math.round((performance.now() - lastOutput) / 1000);
         if (elapsed >= 10) {
-          Deno.stdout.writeSync(
-            enc.encode(`(no output for ${elapsed}s)\n`),
-          );
+          emitLn(`${C.gray}[silence: ${elapsed}s]${C.reset}`);
         }
       }, 10_000);
 
@@ -491,52 +543,148 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
             if (!line.trim()) continue;
             try {
               const obj = JSON.parse(line);
+
+              // System init
+              if (obj.type === "system" && obj.subtype === "init") {
+                emitLn(
+                  `${C.gray}session ${obj.session_id?.slice(0, 8)} model=${
+                    obj.model ?? "?"
+                  }${C.reset}\n`,
+                );
+                continue;
+              }
+
+              // System other / rate limit
+              if (obj.type === "system") {
+                emitLn(
+                  `  ${C.gray}[system: ${obj.subtype ?? "?"}]${C.reset}`,
+                );
+                continue;
+              }
+              if (obj.type === "rate_limit_event") {
+                emitLn(`  ${C.gray}[rate limit]${C.reset}`);
+                continue;
+              }
+
+              // Result (end of session)
+              if (obj.type === "result") {
+                const dur = obj.duration_ms
+                  ? `${(obj.duration_ms / 1000).toFixed(1)}s`
+                  : "?";
+                const cost = obj.total_cost_usd
+                  ? `$${obj.total_cost_usd.toFixed(4)}`
+                  : "";
+                const err = obj.is_error ? ` ${C.red}ERROR${C.reset}` : "";
+                emitLn(
+                  `\n${C.gray}done: ${obj.num_turns} turns, ${dur}${
+                    cost ? ", " + cost : ""
+                  }${err}${C.reset}`,
+                );
+                if (obj.errors?.length) {
+                  for (const e of obj.errors.slice(0, 3)) {
+                    emitLn(`${C.red}  ${midTrunc(e, 200)}${C.reset}`);
+                  }
+                }
+                continue;
+              }
+
+              // Assistant messages
               if (obj.type === "assistant" && obj.message?.content) {
-                Deno.stdout.writeSync(enc.encode("\n"));
                 for (const block of obj.message.content) {
-                  if (block.type === "text" && block.text) {
-                    Deno.stdout.writeSync(enc.encode(block.text + "\n"));
+                  if (block.type === "text" && block.text?.trim()) {
+                    if (lastWasTool) emitLn("");
+                    emitLn(
+                      `${C.bold}${C.yellow}${block.text.trim()}${C.reset}`,
+                    );
+                    emitLn("");
+                    lastWasTool = false;
                   }
                   if (block.type === "tool_use") {
                     const input = block.input ?? {};
                     if (block.name === "Bash" && input.command) {
-                      Deno.stdout.writeSync(
-                        enc.encode(`[$ ${input.command}]\n`),
+                      emitLn(
+                        `  ${C.bold}${C.green}$ ${input.command}${C.reset}`,
                       );
                     } else if (block.name === "Write" && input.file_path) {
-                      Deno.stdout.writeSync(
-                        enc.encode(`[write: ${input.file_path}]\n`),
+                      emitLn(
+                        `  ${C.dim}${C.green}write: ${input.file_path}${C.reset}`,
                       );
                     } else if (block.name === "Read" && input.file_path) {
-                      Deno.stdout.writeSync(
-                        enc.encode(`[read: ${input.file_path}]\n`),
+                      emitLn(
+                        `  ${C.dim}${C.green}read: ${input.file_path}${C.reset}`,
                       );
                     } else if (block.name === "Edit" && input.file_path) {
-                      Deno.stdout.writeSync(
-                        enc.encode(`[edit: ${input.file_path}]\n`),
+                      emitLn(
+                        `  ${C.dim}${C.green}edit: ${input.file_path}${C.reset}`,
+                      );
+                    } else if (block.name === "Grep") {
+                      emitLn(
+                        `  ${C.dim}${C.green}grep: /${
+                          input.pattern ?? ""
+                        }/ in ${input.path ?? "."}${C.reset}`,
+                      );
+                    } else if (block.name === "Glob") {
+                      emitLn(
+                        `  ${C.dim}${C.green}glob: ${
+                          input.pattern ?? ""
+                        }${C.reset}`,
+                      );
+                    } else if (
+                      block.name === "Agent" || block.name === "Task"
+                    ) {
+                      const desc = input.description ??
+                        input.prompt?.slice(0, 60) ?? "";
+                      emitLn(
+                        `  ${C.bold}${C.cyan}agent: ${desc}${C.reset}`,
                       );
                     } else {
-                      Deno.stdout.writeSync(
-                        enc.encode(`[tool: ${block.name}]\n`),
+                      emitLn(
+                        `  ${C.dim}${C.green}${block.name}: ${
+                          midTrunc(JSON.stringify(input), 100)
+                        }${C.reset}`,
                       );
                     }
+                    lastWasTool = true;
+                  }
+                  if (block.type === "thinking" && block.thinking?.trim()) {
+                    emitLn(
+                      `  ${C.gray}thinking: ${
+                        midTrunc(block.thinking.trim(), 120)
+                      }${C.reset}`,
+                    );
+                    lastWasTool = true;
                   }
                 }
+                continue;
               }
+
+              // User messages (tool results)
               if (obj.type === "user" && obj.message?.content) {
                 for (const block of obj.message.content) {
-                  if (
-                    block.type === "tool_result" &&
-                    typeof block.content === "string"
-                  ) {
-                    const text = block.content;
-                    const preview = text.length > 300
-                      ? text.slice(0, 300) + "..."
-                      : text;
-                    Deno.stdout.writeSync(enc.encode(`  → ${preview}\n`));
+                  if (block.type === "tool_result") {
+                    const content = typeof block.content === "string"
+                      ? block.content
+                      : "";
+                    if (!content.trim()) {
+                      emitLn(`  ${C.gray}→ (empty)${C.reset}`);
+                      continue;
+                    }
+                    emitResult(content, !!block.is_error);
+                    continue;
+                  }
+                  if (block.type === "text" && block.text) {
+                    emitLn(
+                      `  ${C.gray}[user: ${
+                        midTrunc(block.text.trim(), 80)
+                      }]${C.reset}`,
+                    );
                   }
                 }
+                continue;
               }
+
+              // Anything else
+              emitLn(`  ${C.gray}[${obj.type ?? "unknown"}]${C.reset}`);
             } catch (e) {
               console.warn(
                 `[iter ${iter}] malformed stream line: ${(e as Error).message}`,
