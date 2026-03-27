@@ -1450,45 +1450,46 @@ async function route(req: Request): Promise<Response> {
         { status: 400 },
       );
     }
-    if (!/^[a-z0-9]{25}$/.test(from) || !/^[a-z0-9]{25}$/.test(to)) {
-      return new Response("Invalid hash format", { status: 400 });
-    }
-    if (!db.atomExists(from)) {
+    const resolvedFrom = resolveHash(from);
+    if (resolvedFrom instanceof Response) return resolvedFrom;
+    const resolvedTo = resolveHash(to);
+    if (resolvedTo instanceof Response) return resolvedTo;
+    if (!db.atomExists(resolvedFrom)) {
       return new Response(`Atom not found: ${from}`, { status: 404 });
     }
-    if (!db.atomExists(to)) {
+    if (!db.atomExists(resolvedTo)) {
       return new Response(`Atom not found: ${to}`, { status: 404 });
     }
 
     // Supersedes requires both atoms to be published
     if (kind === "supersedes") {
-      if (db.getAtomStatus(from) !== "published") {
-        return new Response(`Cannot relate: ${from} is a draft`, {
+      if (db.getAtomStatus(resolvedFrom) !== "published") {
+        return new Response(`Cannot relate: ${resolvedFrom} is a draft`, {
           status: 422,
         });
       }
-      if (db.getAtomStatus(to) !== "published") {
-        return new Response(`Cannot relate: ${to} is a draft`, {
+      if (db.getAtomStatus(resolvedTo) !== "published") {
+        return new Response(`Cannot relate: ${resolvedTo} is a draft`, {
           status: 422,
         });
       }
     }
 
     if (kind === "tests") {
-      const fail = await runTests([from], to);
+      const fail = await runTests([resolvedFrom], resolvedTo);
       if (fail) return fail;
     }
 
-    const isNew = db.insertRelationship(from, kind, to);
+    const isNew = db.insertRelationship(resolvedFrom, kind, resolvedTo);
 
     // Record evaluation metadata for test relationships
     if (kind === "tests" && isNew) {
-      db.upsertTestEvaluation(from, to, "pass");
+      db.upsertTestEvaluation(resolvedFrom, resolvedTo, "pass");
     }
 
     db.insertLog({
       op: "rel.create",
-      subject: `${from}:${to}`,
+      subject: `${resolvedFrom}:${resolvedTo}`,
       detail: JSON.stringify({ kind }),
     });
 
@@ -1512,12 +1513,16 @@ async function route(req: Request): Promise<Response> {
     if (!kind || !from || !to) {
       return new Response("Missing kind, from, or to", { status: 400 });
     }
-    const deleted = db.deleteRelationship(from, kind, to);
+    const delFrom = resolveHash(from);
+    if (delFrom instanceof Response) return delFrom;
+    const delTo = resolveHash(to);
+    if (delTo instanceof Response) return delTo;
+    const deleted = db.deleteRelationship(delFrom, kind, delTo);
     if (!deleted) return new Response("Not found", { status: 404 });
 
     db.insertLog({
       op: "rel.delete",
-      subject: `${from}:${to}`,
+      subject: `${delFrom}:${delTo}`,
       detail: JSON.stringify({ kind }),
     });
 
@@ -1558,13 +1563,25 @@ async function route(req: Request): Promise<Response> {
 
   // GET /relationships?from=&to=&kind= — query relationships
   if (req.method === "GET" && path === "/relationships") {
-    const from = url.searchParams.get("from") ?? undefined;
-    const to = url.searchParams.get("to") ?? undefined;
+    const fromParam = url.searchParams.get("from") ?? undefined;
+    const toParam = url.searchParams.get("to") ?? undefined;
     const kind = url.searchParams.get("kind") ?? undefined;
-    if (!from && !to && !kind) {
+    if (!fromParam && !toParam && !kind) {
       return new Response("At least one of from, to, kind is required", {
         status: 400,
       });
+    }
+    let from: string | undefined;
+    if (fromParam) {
+      const r = resolveHash(fromParam);
+      if (r instanceof Response) return r;
+      from = r;
+    }
+    let to: string | undefined;
+    if (toParam) {
+      const r = resolveHash(toParam);
+      if (r instanceof Response) return r;
+      to = r;
     }
     const rows: Relationship[] = db.queryRelationships({ from, to, kind });
     return new Response(JSON.stringify(rows), {
