@@ -502,6 +502,29 @@ async function route(req: Request): Promise<Response> {
       );
     }
 
+    // Type check
+    try {
+      const tcRes = await fetch(`${checkerUrl}/typecheck`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: body.source, serverUrl }),
+      });
+      const tc = await tcRes.json() as {
+        passed: boolean;
+        diagnostics: string;
+      };
+      if (!tc.passed) {
+        return new Response(`Type errors:\n${tc.diagnostics}`, {
+          status: 422,
+        });
+      }
+    } catch (e) {
+      return new Response(
+        `Type check failed: checker unreachable (${(e as Error).message})`,
+        { status: 503 },
+      );
+    }
+
     const hash = contentHash(body.source);
 
     // Collision checks

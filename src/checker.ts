@@ -409,6 +409,59 @@ async function handleValidateTest(req: Request): Promise<Response> {
   );
 }
 
+async function handleTypecheck(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+  let body: { source: string; serverUrl: string };
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("Invalid JSON", { status: 400 });
+  }
+  if (!body.source || !body.serverUrl) {
+    return new Response("Missing source or serverUrl", { status: 400 });
+  }
+
+  // Rewrite relative atom imports to HTTP URLs for remote resolution
+  const rewritten = body.source.replace(
+    /from\s+"\.\.\/\.\.\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+\.ts)"/g,
+    `from "${body.serverUrl}/a/$1/$2/$3"`,
+  );
+
+  const serverHost = new URL(body.serverUrl).host;
+  const tmpDir = "/tmp/zts-typecheck";
+  await Deno.mkdir(tmpDir, { recursive: true });
+  const tmpFile = await Deno.makeTempFile({ suffix: ".ts", dir: tmpDir });
+  try {
+    await Deno.writeTextFile(tmpFile, rewritten);
+    const proc = new Deno.Command(Deno.execPath(), {
+      args: [
+        "check",
+        `--allow-import=${serverHost}`,
+        tmpFile,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const output = await proc.output();
+    const passed = output.code === 0;
+    const text = new TextDecoder().decode(output.stdout) +
+      new TextDecoder().decode(output.stderr);
+
+    return new Response(
+      JSON.stringify({ passed, diagnostics: text.trim() }),
+      { headers: { "content-type": "application/json" } },
+    );
+  } finally {
+    await Deno.remove(tmpFile).catch((e) =>
+      console.error(
+        `warning: failed to clean up ${tmpFile}: ${e.message}`,
+      )
+    );
+  }
+}
+
 function handler(req: Request): Promise<Response> | Response {
   const url = new URL(req.url);
   if (url.pathname === "/health") {
@@ -430,6 +483,9 @@ function handler(req: Request): Promise<Response> | Response {
   }
   if (url.pathname === "/check-coverage") {
     return handleCheckCoverage(req);
+  }
+  if (url.pathname === "/typecheck") {
+    return handleTypecheck(req);
   }
   return new Response("Not found", { status: 404 });
 }
