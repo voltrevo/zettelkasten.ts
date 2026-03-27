@@ -382,15 +382,16 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         `[iter ${iter}] ${mode}${goalName ? ` — goal: ${goalName}` : ""}`,
       );
 
-      // Fetch raw prompt template
-      const promptName = isRetrospective ? "retrospective" : "prompt";
+      // Fetch prompt template from server (checks DB override, then disk default)
+      const pCap = realPromptCap(config.serverUrl);
       const overrideFile = isRetrospective
         ? config.retrospectivePromptFile
         : config.promptFile;
-      const pCap = realPromptCap(config.serverUrl);
       const rawPrompt = overrideFile
         ? await pCap.readTextFile(overrideFile)
-        : await pCap.fetchPrompt(promptName);
+        : await pCap.fetchPrompt(
+          isRetrospective ? "retrospective" : "prompt",
+        );
 
       const absDir = dir.startsWith("/") ? dir : `${Deno.cwd()}/${dir}`;
 

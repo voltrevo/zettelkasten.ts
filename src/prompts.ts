@@ -1,14 +1,11 @@
-/** Default prompts for the agent loop. Reads from .md files at import time. */
+/** Default prompts for the agent loop. Reads from .md files on each call. */
 
 const PROMPT_DIR = new URL(".", import.meta.url).pathname;
 
-// Read prompt files synchronously at module load
-const DEFAULT_PROMPT = Deno.readTextFileSync(`${PROMPT_DIR}/worker-prompt.md`);
-const DEFAULT_RETROSPECTIVE = Deno.readTextFileSync(
-  `${PROMPT_DIR}/worker-retrospective.md`,
-);
-
-export { DEFAULT_PROMPT, DEFAULT_RETROSPECTIVE };
+const PROMPT_FILES = {
+  prompt: `${PROMPT_DIR}/worker-prompt.md`,
+  retrospective: `${PROMPT_DIR}/worker-retrospective.md`,
+} as const;
 
 export const PROMPT_NAMES = [
   "prompt",
@@ -17,11 +14,7 @@ export const PROMPT_NAMES = [
 
 export type PromptName = typeof PROMPT_NAMES[number];
 
+/** Read the default prompt from disk (not cached — picks up edits). */
 export function getDefaultPrompt(name: PromptName): string {
-  switch (name) {
-    case "prompt":
-      return DEFAULT_PROMPT;
-    case "retrospective":
-      return DEFAULT_RETROSPECTIVE;
-  }
+  return Deno.readTextFileSync(PROMPT_FILES[name]);
 }
