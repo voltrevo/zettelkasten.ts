@@ -146,11 +146,19 @@ export interface GoalComment {
 
 // ---- Draft/Publish result types ----
 
+export interface MigratedTest {
+  hash: string;
+  name: string | null;
+  passed: boolean;
+  error?: string;
+}
+
 export interface DraftResult {
   hash: string;
   url: string;
   httpUrl: string;
   existing: boolean;
+  migratedTests?: MigratedTest[];
 }
 
 export interface AddTestResult {
@@ -197,7 +205,10 @@ export class ApiError extends Error {
 export interface ZtsClient {
   // Atoms
   getAtom(hash: string): Promise<string>;
-  draft(source: string, opts?: { readable?: boolean }): Promise<DraftResult>;
+  draft(
+    source: string,
+    opts?: { readable?: boolean; supersedes?: string },
+  ): Promise<DraftResult>;
   addTest(
     source: string,
     targets: string[],
@@ -382,11 +393,16 @@ function buildClient(
       return info.source;
     },
 
-    draft: (source, opts) =>
-      json(opts?.readable ? "/draft?readable=1" : "/draft", {
+    draft: (source, opts) => {
+      const params = new URLSearchParams();
+      if (opts?.readable) params.set("readable", "1");
+      if (opts?.supersedes) params.set("supersedes", opts.supersedes);
+      const qs = params.toString();
+      return json(`/draft${qs ? `?${qs}` : ""}`, {
         method: "POST",
         body: source,
-      }),
+      });
+    },
 
     addTest: (source, targets) =>
       json("/add-test", {

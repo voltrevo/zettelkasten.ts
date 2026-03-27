@@ -186,8 +186,9 @@ Hash prefixes work everywhere (e.g. `zts info 3ax9`). Relationship kinds:
 - TypeScript type annotations count toward the token limit
 - Use `127.0.0.1` not `localhost` for Deno TCP
 - Tag atoms with goals when publishing: `-g <goal>`
-- Mark `supersedes` when your atom improves on an existing one (between
-  published atoms only)
+- When improving an existing atom, use `zts draft --supersedes <old-hash>`. This
+  migrates passing tests from the old atom and auto-creates the `supersedes`
+  relationship on publish
 - When a goal is complete: `zts goal comment <name> "DONE: <what was achieved>"`
   then `zts goal done <name>`
 
@@ -206,8 +207,8 @@ behavior. If the goal has tags:
   ```
 - Check coverage with `zts goal coverage <goal> --entries <hash1>,<hash2>,...`
   to see which tags your dependency tree covers vs which are missing.
-- Some tags describe behavior that can only be verified interactively (e.g.
-  real network tests). Document those results in a goal comment.
+- Some tags describe behavior that can only be verified interactively (e.g. real
+  network tests). Document those results in a goal comment.
 
 Not all goals use tags. If the goal has no `§` markers, the standard workflow
 applies — write tests as usual.
@@ -366,16 +367,28 @@ http://{{server-url}}/a/1v/2v/t8uponfx2bg00sllz3ns4.ts
   auto-published 1 test(s)
 ```
 
-**If your atom improves on an existing one, mark it with `supersedes`:**
+**If your atom improves on an existing one**, use `--supersedes` at draft time:
 
 ```
-$ zts relate 1v2vt8u supersedes qcoe6p
+$ zts draft ./tmp/multiply.ts --supersedes qcoe6p
+1v2vt8u...
+
+Migrating tests from qcoe6p...
+  q7xrcp2  PASS  "multiply: known products"     → inherited
+  a3b9f1k  PASS  "multiply: zero"               → inherited
+  x8m2j4p  FAIL  "multiply: negative overflow"
+    expected -2147483648, got 0
+
+2/3 tests inherited. 1 test does not pass against this draft.
+Note: this is expected when superseding atoms diverge on purpose.
 ```
 
-This is how the corpus tracks which atom is the best version of an idea.
-`zts tops <hash>` walks the supersedes chain to find the current best. Always
-check `zts search` / `zts tops` before building — if a working version exists,
-build on it or supersede it rather than starting from scratch.
+Tests that pass are automatically linked to your draft. Tests that fail are
+shown for your information — this is normal when the new atom intentionally
+changes behavior. The `supersedes` relationship is created automatically at
+publish time. `zts tops <hash>` walks the supersedes chain to find the current
+best. Always check `zts search` / `zts tops` before building — if a working
+version exists, build on it or supersede it rather than starting from scratch.
 
 If your approach didn't work out at any point, archive your drafts to clean up:
 

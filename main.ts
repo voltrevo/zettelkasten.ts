@@ -55,6 +55,7 @@ const args = parseArgs(Deno.args, {
     "retrospective-prompt",
     "dir",
     "entries",
+    "supersedes",
   ],
   boolean: [
     "f",
@@ -891,16 +892,50 @@ async function cmdGet(rest: string[]): Promise<void> {
 async function cmdDraft(rest: string[]): Promise<void> {
   const file = rest[0];
   const readable = !!args["this-code-is-readable"];
+  const supersedes = args.supersedes;
   if (!file) {
-    console.error("usage: zts draft <file>");
+    console.error("usage: zts draft <file> [--supersedes <hash>]");
     Deno.exit(1);
   }
   const content = await Deno.readTextFile(file);
   try {
-    const result = await client.draft(content, { readable });
+    const result = await client.draft(content, { readable, supersedes });
     console.log(result.hash);
     console.log(result.httpUrl);
     if (result.existing) console.error("(existing draft)");
+    if (result.migratedTests) {
+      const tests = result.migratedTests;
+      const passed = tests.filter((t) => t.passed);
+      const failed = tests.filter((t) => !t.passed);
+      if (tests.length > 0) {
+        console.log(`\nMigrating tests from ${supersedes}...`);
+        for (const t of tests) {
+          if (t.passed) {
+            console.log(
+              `  ${t.hash.slice(0, 7)}  PASS  ${t.name ?? ""}  → inherited`,
+            );
+          } else {
+            console.log(`  ${t.hash.slice(0, 7)}  FAIL  ${t.name ?? ""}`);
+            if (t.error) {
+              for (const line of t.error.split("\n").slice(0, 3)) {
+                console.log(`    ${line}`);
+              }
+            }
+          }
+        }
+        console.log(
+          `\n${passed.length}/${tests.length} tests inherited.` +
+            (failed.length > 0
+              ? ` ${failed.length} test(s) do not pass against this draft.`
+              : ""),
+        );
+        if (failed.length > 0) {
+          console.log(
+            "Note: this is expected when superseding atoms diverge on purpose.",
+          );
+        }
+      }
+    }
   } catch (e) {
     if (e instanceof ApiError) {
       console.error(`error: ${e.status} ${e.message}`);
@@ -1381,7 +1416,8 @@ async function cmdGoalCoverage(
   console.log();
 
   const covered = [...goalTags.keys()].filter((t) => coveredTags.has(t)).sort();
-  const missing = [...goalTags.keys()].filter((t) => !coveredTags.has(t)).sort();
+  const missing = [...goalTags.keys()].filter((t) => !coveredTags.has(t))
+    .sort();
 
   if (covered.length > 0) {
     console.log(`Covered (${covered.length}/${goalTags.size}):`);

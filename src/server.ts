@@ -363,12 +363,91 @@ async function route(req: Request): Promise<Response> {
 
     db.insertLog({ op: "atom.draft", subject: hash });
 
+    // Handle --supersedes: store property and migrate tests
+    const supersedesHash = url.searchParams.get("supersedes");
+    let migratedTests: {
+      hash: string;
+      name: string | null;
+      passed: boolean;
+      error?: string;
+    }[] | undefined;
+
+    if (supersedesHash) {
+      const resolved = db.resolveHash(supersedesHash);
+      if (!resolved) {
+        return new Response(`Supersedes target not found: ${supersedesHash}`, {
+          status: 404,
+        });
+      }
+      db.setProperty(hash, "supersedes", resolved);
+
+      // Find tests on the old atom
+      const oldTests = db.queryRelationships({
+        to: resolved,
+        kind: "tests",
+      });
+
+      if (oldTests.length > 0) {
+        migratedTests = [];
+        for (const rel of oldTests) {
+          const testHash = rel.from;
+          const testAtom = db.getAtom(testHash);
+          const testName = testAtom ? extractTestName(testAtom.source) : null;
+          // Run this test against the new draft
+          try {
+            const checkRes = await fetch(`${checkerUrl}/check`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                serverUrl,
+                targetHash: hash,
+                testHashes: [testHash],
+              }),
+            });
+            const result = await checkRes.json() as {
+              passed: boolean;
+              stdout: string;
+              stderr: string;
+            };
+            if (result.passed) {
+              // Link the test to the new draft
+              db.insertRelationship(testHash, "tests", hash);
+              db.insertTestRun({
+                testAtom: testHash,
+                targetAtom: hash,
+                runBy: "checker",
+                result: "pass",
+                durationMs: 0,
+                details: null,
+              });
+            }
+            migratedTests.push({
+              hash: testHash,
+              name: testName,
+              passed: result.passed,
+              error: result.passed
+                ? undefined
+                : (result.stdout + result.stderr).slice(0, 500),
+            });
+          } catch {
+            migratedTests.push({
+              hash: testHash,
+              name: testName,
+              passed: false,
+              error: "checker unreachable",
+            });
+          }
+        }
+      }
+    }
+
     return new Response(
       JSON.stringify({
         hash,
         url: urlPath,
         httpUrl: `${serverUrl}${urlPath}`,
         existing: false,
+        migratedTests,
       }),
       { status: 201, headers: { "content-type": "application/json" } },
     );
@@ -679,6 +758,13 @@ async function route(req: Request): Promise<Response> {
         }
       }
 
+      // Auto-create supersedes relationship from property
+      const supersedesTarget = db.getProperty(hash, "supersedes");
+      if (supersedesTarget) {
+        db.insertRelationship(hash, "supersedes", supersedesTarget);
+        db.unsetProperty(hash, "supersedes");
+      }
+
       db.insertLog({ op: "atom.publish", subject: hash });
 
       return new Response(
@@ -687,6 +773,7 @@ async function route(req: Request): Promise<Response> {
           url: hashToUrlPath(hash),
           httpUrl: `${serverUrl}${hashToUrlPath(hash)}`,
           autoPublished,
+          supersedes: supersedesTarget ?? undefined,
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );

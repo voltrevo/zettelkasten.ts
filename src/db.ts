@@ -780,6 +780,13 @@ export class Db {
     return changes > 0;
   }
 
+  getProperty(hash: string, key: string): string | null {
+    const row = this.db.prepare(
+      "SELECT value FROM properties WHERE hash = ? AND key = ?",
+    ).get<{ value: string | null }>(hash, key);
+    return row?.value ?? null;
+  }
+
   getProperties(hash: string): { key: string; value: string | null }[] {
     return this.db.prepare(
       "SELECT key, value FROM properties WHERE hash = ?",

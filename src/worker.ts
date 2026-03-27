@@ -328,7 +328,9 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         goals = await client.listGoals();
       } catch (e) {
         console.warn(
-          `[worker] server unreachable: ${(e as Error).message}, backing off 30s`,
+          `[worker] server unreachable: ${
+            (e as Error).message
+          }, backing off 30s`,
         );
         await new Promise((r) => setTimeout(r, 30_000));
         continue;
@@ -354,7 +356,9 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         goalText = formatGoalText(detail);
       } catch (e) {
         console.warn(
-          `[worker] failed to fetch goal "${goalName}": ${(e as Error).message}, backing off 30s`,
+          `[worker] failed to fetch goal "${goalName}": ${
+            (e as Error).message
+          }, backing off 30s`,
         );
         await new Promise((r) => setTimeout(r, 30_000));
         continue;
@@ -607,13 +611,13 @@ export async function stopWorker(config: WorkerConfig): Promise<void> {
     // Wait briefly for cleanup
     await new Promise((r) => setTimeout(r, 2000));
     await Deno.remove(pidFile).catch((e) =>
-      console.warn(`warning: failed to remove ${pidFile}: ${e.message}`),
+      console.warn(`warning: failed to remove ${pidFile}: ${e.message}`)
     );
     console.log("Worker stopped.");
   } catch {
     console.warn(`Process ${pid} not found, cleaning up stale PID file`);
     await Deno.remove(pidFile).catch((e) =>
-      console.warn(`warning: failed to remove ${pidFile}: ${e.message}`),
+      console.warn(`warning: failed to remove ${pidFile}: ${e.message}`)
     );
   }
 }

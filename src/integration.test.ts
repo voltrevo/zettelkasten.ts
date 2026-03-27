@@ -1039,6 +1039,135 @@ Deno.test("integration: full workflow", async (t) => {
       assertEquals(ev, null);
     });
 
+    // ---- Draft --supersedes test migration ----
+
+    let ssOldHash = "";
+    let ssNewHash = "";
+
+    await timed(
+      t,
+      "supersedes: draft old atom and publish with test",
+      async () => {
+        const oldSource =
+          `// adds two numbers\nexport function add(a: number, b: number): number { return a + b; }\n`;
+        const d = await client.draft(oldSource);
+        ssOldHash = d.hash;
+        const testSource =
+          `export class Test {\n  static name = "add: basic";\n  run(add: (a: number, b: number) => number): void {\n    if (add(2, 3) !== 5) throw new Error("2+3");\n    if (add(-1, 1) !== 0) throw new Error("-1+1");\n  }\n}\n`;
+        await client.addTest(testSource, [ssOldHash]);
+        await client.publish(ssOldHash, { description: "add two numbers" });
+        const info = await client.info(ssOldHash);
+        assertEquals(info.testedBy.length, 1);
+      },
+      SUBPROCESS,
+    );
+
+    await timed(
+      t,
+      "supersedes: draft new atom inherits passing tests",
+      async () => {
+        // New atom with same interface — tests should pass
+        const newSource =
+          `// adds two numbers (improved)\nexport function add(a: number, b: number): number { return a + b; }\n`;
+        const d = await client.draft(newSource, { supersedes: ssOldHash });
+        ssNewHash = d.hash;
+        log("supersedes draft:", ssNewHash, "migrated:", d.migratedTests);
+        assertEquals(d.migratedTests !== undefined, true);
+        assertEquals(d.migratedTests!.length, 1);
+        assertEquals(d.migratedTests![0].passed, true);
+        // Test should be linked to new draft
+        const info = await client.info(ssNewHash);
+        assertEquals(info.testedBy.length, 1);
+        // Supersedes property should be set
+        const props = await client.listProperties(ssNewHash);
+        const ssProp = props.find((p) => p.key === "supersedes");
+        assertEquals(ssProp?.value, ssOldHash);
+      },
+      SUBPROCESS,
+    );
+
+    await timed(
+      t,
+      "supersedes: publish auto-creates relationship",
+      async () => {
+        await client.publish(ssNewHash, { description: "add two numbers v2" });
+        // Supersedes relationship should exist
+        const rels = await client.queryRelationships({
+          from: ssNewHash,
+          kind: "supersedes",
+        });
+        assertEquals(rels.length, 1);
+        assertEquals(rels[0].to, ssOldHash);
+        // Property should be cleared
+        const props = await client.listProperties(ssNewHash);
+        assertEquals(
+          props.find((p) => p.key === "supersedes"),
+          undefined,
+        );
+      },
+      SUBPROCESS,
+    );
+
+    await timed(
+      t,
+      "supersedes: failing test reported but not linked",
+      async () => {
+        // Draft atom with different behavior
+        const breakingSource =
+          `// subtracts instead of adding\nexport function add(a: number, b: number): number { return a - b; }\n`;
+        const d = await client.draft(breakingSource, {
+          supersedes: ssOldHash,
+        });
+        log("breaking draft:", d.hash, "migrated:", d.migratedTests);
+        assertEquals(d.migratedTests!.length, 1);
+        assertEquals(d.migratedTests![0].passed, false);
+        assertEquals(d.migratedTests![0].error !== undefined, true);
+        // Test should NOT be linked
+        const info = await client.info(d.hash);
+        assertEquals(info.testedBy.length, 0);
+        // Clean up
+        await client.archive(d.hash);
+      },
+      SUBPROCESS,
+    );
+
+    await timed(
+      t,
+      "supersedes: cleanup",
+      async () => {
+        // Remove relationships and delete
+        const rels = await client.queryRelationships({
+          from: ssNewHash,
+          kind: "supersedes",
+        });
+        for (const r of rels) {
+          await client.removeRelationship(r.from, r.kind, r.to);
+        }
+        const testRels = await client.queryRelationships({
+          to: ssNewHash,
+          kind: "tests",
+        });
+        for (const r of testRels) {
+          await client.removeRelationship(r.from, r.kind, r.to);
+          try {
+            await client.deleteAtom(r.from);
+          } catch { /* may have other rels */ }
+        }
+        const oldTestRels = await client.queryRelationships({
+          to: ssOldHash,
+          kind: "tests",
+        });
+        for (const r of oldTestRels) {
+          await client.removeRelationship(r.from, r.kind, r.to);
+          try {
+            await client.deleteAtom(r.from);
+          } catch { /* may have other rels */ }
+        }
+        await client.deleteAtom(ssNewHash);
+        await client.deleteAtom(ssOldHash);
+      },
+    );
+
     // ---- Cleanup chain atoms ----
 
     await timed(
