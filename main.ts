@@ -54,6 +54,7 @@ const args = parseArgs(Deno.args, {
     "prompt-file",
     "retrospective-prompt",
     "dir",
+    "entries",
   ],
   boolean: [
     "f",
@@ -166,7 +167,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   - All imported atoms to be published
   - At least one test (unless it's a test atom itself)
   Associated test drafts are auto-published.
-  -d <desc>   description (required, ASCII only)
+  -d <desc>   description (required)
   -g <goal>   tag with a goal`,
 
   archive: `zts archive <hash>
@@ -276,7 +277,9 @@ zts goal undone <name>                revert completion
 zts goal comment <name> <text>        append observation
 zts goal comments <name> [--recent N] read observations
 zts goal files <name>                 list files in directory goal
-zts goal file <name> <path>           read a single goal file`,
+zts goal file <name> <path>           read a single goal file
+zts goal coverage <name> --entries <h1>,<h2>,...
+                                      check § tag coverage from atom dependency tree`,
 
   admin: `zts admin goal add <name> [--weight N] [--body <text>] [--dir <path>]
   Create a goal. --dir uploads a directory as a linked markdown goal.
@@ -746,6 +749,8 @@ Goals:
                                read observations
   goal files <name>            list files in directory goal
   goal file <name> <path>      read a single goal file
+  goal coverage <name> --entries <h1>,<h2>
+                               check § tag coverage from atom tree
 
 Admin:
   admin goal add <name> [--weight N] [--body <text>] [--dir <path>]
@@ -1288,6 +1293,109 @@ async function cmdTops(rest: string[]): Promise<void> {
   }
 }
 
+async function cmdGoalCoverage(
+  goalName: string,
+  entryHashes: string[],
+): Promise<void> {
+  // 1. Collect all § tags from the goal
+  const goalTags = new Map<string, string>(); // tag -> file:line context
+  let goalFiles: string[];
+  try {
+    goalFiles = await client.goalFiles(goalName);
+  } catch {
+    // Simple text goal — read body
+    const goal = await client.getGoal(goalName);
+    goalFiles = [];
+    const tagRe = /\[§([^\]]+)\]/g;
+    let m;
+    for (const line of (goal.body ?? "").split("\n")) {
+      while ((m = tagRe.exec(line)) !== null) {
+        goalTags.set(`§${m[1]}`, line.trim().slice(0, 80));
+      }
+    }
+  }
+  for (const f of goalFiles) {
+    const content = await client.goalFile(goalName, f);
+    const tagRe = /\[§([^\]]+)\]/g;
+    let m;
+    for (const line of content.split("\n")) {
+      while ((m = tagRe.exec(line)) !== null) {
+        goalTags.set(`§${m[1]}`, `${f}: ${line.trim().slice(0, 60)}`);
+      }
+    }
+  }
+
+  if (goalTags.size === 0) {
+    console.log("No § tags found in goal.");
+    return;
+  }
+
+  // 2. Walk dependency tree from entry points
+  const allAtoms = new Set<string>();
+  const queue = [...entryHashes];
+  while (queue.length > 0) {
+    const hash = queue.pop()!;
+    if (allAtoms.has(hash)) continue;
+    const info = await client.info(hash);
+    allAtoms.add(info.hash); // resolve prefix to full hash
+    for (const dep of info.imports) {
+      if (!allAtoms.has(dep)) queue.push(dep);
+    }
+  }
+
+  // 3. Collect all test atoms for atoms in the tree
+  const testHashes = new Set<string>();
+  for (const hash of allAtoms) {
+    const info = await client.info(hash);
+    for (const t of info.testedBy) testHashes.add(t);
+  }
+
+  // 4. Grep test sources for § tags
+  const coveredTags = new Map<string, string>(); // tag -> test info
+  for (const hash of testHashes) {
+    const source = await client.getAtom(hash);
+    const info = await client.info(hash);
+    const tagRe = /§([^\s\]]+)/g;
+    let m;
+    while ((m = tagRe.exec(source)) !== null) {
+      const tag = `§${m[1]}`;
+      if (goalTags.has(tag)) {
+        const desc = info.description?.slice(0, 50) ?? hash;
+        coveredTags.set(tag, `${hash.slice(0, 7)} ${desc}`);
+      }
+    }
+  }
+
+  // 5. Report
+  console.log(`Goal: ${goalName} (${goalTags.size} tags)`);
+  console.log(
+    `Entry points: ${entryHashes.length} atoms, ${allAtoms.size} in dep tree, ${testHashes.size} tests`,
+  );
+  console.log();
+
+  const covered = [...goalTags.keys()].filter((t) => coveredTags.has(t)).sort();
+  const missing = [...goalTags.keys()].filter((t) => !coveredTags.has(t)).sort();
+
+  if (covered.length > 0) {
+    console.log(`Covered (${covered.length}/${goalTags.size}):`);
+    for (const tag of covered) {
+      console.log(`  ${tag}  ${coveredTags.get(tag)}`);
+    }
+    console.log();
+  }
+
+  if (missing.length > 0) {
+    console.log(`Missing (${missing.length}/${goalTags.size}):`);
+    for (const tag of missing) {
+      console.log(`  ${tag}  (${goalTags.get(tag)})`);
+    }
+  }
+
+  if (missing.length === 0) {
+    console.log("All tags covered.");
+  }
+}
+
 async function cmdGoal(rest: string[]): Promise<void> {
   const sub = rest[0];
   if (sub === "pick") {
@@ -1479,9 +1587,27 @@ async function cmdGoal(rest: string[]): Promise<void> {
       }
       throw e;
     }
+  } else if (sub === "coverage") {
+    const name = rest[1];
+    const entries = args.entries;
+    if (!name || !entries) {
+      console.error(
+        "usage: zts goal coverage <name> --entries <hash1>,<hash2>,...",
+      );
+      Deno.exit(1);
+    }
+    try {
+      await cmdGoalCoverage(name, entries.split(","));
+    } catch (e) {
+      if (e instanceof ApiError) {
+        console.error(`error: ${e.status} ${e.message}`);
+        Deno.exit(1);
+      }
+      throw e;
+    }
   } else {
     console.error(
-      "usage: zts goal <pick|show|list|done|undone|comment|comments|files|file> ...",
+      "usage: zts goal <pick|show|list|done|undone|comment|comments|files|file|coverage> ...",
     );
     Deno.exit(1);
   }

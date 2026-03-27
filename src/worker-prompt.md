@@ -183,7 +183,6 @@ Hash prefixes work everywhere (e.g. `zts info 3ax9`). Relationship kinds:
 
 ## Conventions
 
-- ASCII only in descriptions (no Unicode)
 - TypeScript type annotations count toward the token limit
 - Use `127.0.0.1` not `localhost` for Deno TCP
 - Tag atoms with goals when publishing: `-g <goal>`

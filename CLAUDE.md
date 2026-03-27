@@ -132,8 +132,7 @@ The hash is 25 chars. Split into 2/2/21 for the import path inside atoms:
 
 Publishing requires all imported atoms to already be published and at least one
 test (test atoms are exempt). Associated test drafts are auto-published.
-Description must be **ASCII only**. Use `zts archive <hash>` to clean up
-abandoned drafts.
+Use `zts archive <hash>` to clean up abandoned drafts.
 
 The server validates atoms before storing (export count, import paths, size
 limit after minification). Just draft and let the server reject — don't try to
