@@ -221,6 +221,10 @@ behavior. If the goal has tags:
   to see which tags your dependency tree covers vs which are missing.
 - Some tags describe behavior that can only be verified interactively (e.g. real
   network tests). Document those results in a goal comment.
+- If you discover a spec tag cannot be satisfied due to a bug in the spec
+  itself (e.g. a wrong expected value), write a test for the intention behind
+  the tag *without* including the tag in the test name. Explain your reasoning
+  in your summary — what the spec says, what you believe is correct, and why.
 
 Not all goals use tags. If the goal has no `§` markers, the standard workflow
 applies — write tests as usual.
