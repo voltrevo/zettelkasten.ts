@@ -43,6 +43,10 @@ export async function collectAtoms(
   return collected;
 }
 
+function hashToAtomPath(hash: string): string {
+  return `./a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`;
+}
+
 // Build a store-only (STORE, no compression) ZIP from a map of path → bytes.
 export function buildZip(files: Map<string, Uint8Array>): Uint8Array {
   const enc = new TextEncoder();
@@ -157,9 +161,11 @@ export function parseZip(data: Uint8Array): Map<string, Uint8Array> {
 
 // Build a ZIP bundle for rootHash and its transitive dependencies.
 // The bundle includes a run.ts entry point and all atoms under a/.
+// If testHashes is provided, includes test atoms and a test.ts runner.
 export async function bundleZip(
   rootHash: string,
   readFile: (hash: string) => Promise<string>,
+  testHashes?: Map<string, string[]>, // targetHash -> testHash[]
 ): Promise<Uint8Array> {
   const atoms = await collectAtoms(rootHash, readFile);
   const dir = rootHash.slice(0, 8);
@@ -179,6 +185,52 @@ export async function bundleZip(
       `${dir}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash.slice(4)}.ts`,
       enc.encode(content),
     );
+  }
+
+  // Include tests if requested
+  if (testHashes) {
+    // Collect all test atoms (and their transitive deps)
+    const allTestHashes = new Set<string>();
+    for (const tests of testHashes.values()) {
+      for (const th of tests) allTestHashes.add(th);
+    }
+    for (const th of allTestHashes) {
+      if (!atoms.has(th)) {
+        const testAtoms = await collectAtoms(th, readFile);
+        for (const [h, content] of testAtoms) {
+          if (!atoms.has(h)) {
+            files.set(
+              `${dir}/a/${h.slice(0, 2)}/${h.slice(2, 4)}/${h.slice(4)}.ts`,
+              enc.encode(content),
+            );
+          }
+        }
+      }
+    }
+
+    // Generate test.ts runner
+    const imports: string[] = [];
+    const tests: string[] = [];
+    let i = 0;
+    for (const [targetHash, testHashList] of testHashes) {
+      for (const testHash of testHashList) {
+        imports.push(
+          `import { Test as T${i} } from "${hashToAtomPath(testHash)}";`,
+        );
+        imports.push(
+          `import * as Target${i} from "${hashToAtomPath(targetHash)}";`,
+        );
+        tests.push(
+          `Deno.test(T${i}.name, () => {` +
+            ` const target = Object.values(Target${i}).find(v => v !== undefined)!;` +
+            ` new T${i}().run(target);` +
+            ` });`,
+        );
+        i++;
+      }
+    }
+    const testTs = imports.join("\n") + "\n\n" + tests.join("\n") + "\n";
+    files.set(`${dir}/test.ts`, enc.encode(testTs));
   }
 
   return buildZip(files);

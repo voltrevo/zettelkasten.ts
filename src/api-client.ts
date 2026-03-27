@@ -307,7 +307,10 @@ export interface ZtsClient {
   ): Promise<LogEntry[]>;
 
   // Bundle
-  getBundle(hash: string): Promise<Uint8Array>;
+  getBundle(
+    hash: string,
+    opts?: { includeTests?: boolean },
+  ): Promise<Uint8Array>;
 
   // Subprocess operations (require DenoCap)
   exec(
@@ -674,8 +677,9 @@ function buildClient(
       }`),
 
     // Bundle
-    async getBundle(hash) {
-      const res = await transport.fetch(`/bundle/${hash}`);
+    async getBundle(hash, opts) {
+      const q = opts?.includeTests ? "?tests=1" : "";
+      const res = await transport.fetch(`/bundle/${hash}${q}`);
       if (!res.ok) {
         throw new ApiError(res.status, await res.text());
       }

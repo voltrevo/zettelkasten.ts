@@ -1,7 +1,7 @@
 import { brotliCompress, constants } from "node:zlib";
 import { promisify } from "node:util";
 import { keccak_256 } from "@noble/hashes/sha3";
-import { bundleZip, extractDependencies } from "./bundle.ts";
+import { bundleZip, collectAtoms, extractDependencies } from "./bundle.ts";
 import {
   type AuthConfig,
   type AuthTier,
@@ -860,8 +860,29 @@ async function route(req: Request): Promise<Response> {
       const resolved = resolveHash(bundleMatch[1]);
       if (resolved instanceof Response) return resolved;
       const hash = resolved;
+      const includeTests = url.searchParams.get("tests") === "1";
       let zip: Uint8Array;
       try {
+        // Collect test hashes if requested
+        let testMap: Map<string, string[]> | undefined;
+        if (includeTests) {
+          // Walk the dep tree first to know which atoms to find tests for
+          const atoms = await collectAtoms(hash, (h) => {
+            const source = db.getSource(h);
+            if (!source) throw new Error(`Atom not found: ${h}`);
+            return Promise.resolve(source);
+          });
+          testMap = new Map();
+          for (const atomHash of atoms.keys()) {
+            const tests = db.queryRelationships({
+              to: atomHash,
+              kind: "tests",
+            });
+            if (tests.length > 0) {
+              testMap.set(atomHash, tests.map((r) => r.from));
+            }
+          }
+        }
         zip = await bundleZip(
           hash,
           (h) => {
@@ -869,6 +890,7 @@ async function route(req: Request): Promise<Response> {
             if (!source) throw new Error(`Atom not found: ${h}`);
             return Promise.resolve(source);
           },
+          testMap,
         );
       } catch (e) {
         return new Response((e as Error).message, { status: 404 });

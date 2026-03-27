@@ -67,6 +67,7 @@ const args = parseArgs(Deno.args, {
     "dangerously-skip-permissions",
     "raw",
     "this-code-is-readable",
+    "include-tests",
     "h",
     "help",
   ],
@@ -2088,13 +2089,14 @@ async function cmdExec(rest: string[]): Promise<void> {
 async function cmdBundle(rest: string[]): Promise<void> {
   const hash = rest[0];
   if (!hash) {
-    console.error("usage: zts bundle <hash> [-o <dir>]");
+    console.error("usage: zts bundle <hash> [-o <dir>] [--include-tests]");
     Deno.exit(1);
   }
+  const includeTests = !!args["include-tests"];
   const outDir = args.o;
   if (outDir) {
     try {
-      const zipData = await client.getBundle(hash);
+      const zipData = await client.getBundle(hash, { includeTests });
       const zip = parseZip(zipData);
       for (const [path, data] of zip) {
         const fullPath = `${outDir}/${path}`;
@@ -2112,7 +2114,7 @@ async function cmdBundle(rest: string[]): Promise<void> {
     }
   } else {
     try {
-      const zipData = await client.getBundle(hash);
+      const zipData = await client.getBundle(hash, { includeTests });
       await Deno.stdout.write(zipData);
     } catch (e) {
       if (e instanceof ApiError) {
