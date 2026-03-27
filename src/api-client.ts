@@ -815,8 +815,11 @@ ${scriptBody}
       if (!d || !base) {
         throw new Error("runTests requires DenoCap and baseUrl");
       }
+      // Resolve prefix to full hash
+      const info = await json<{ hash: string }>(`/info/${hash}`);
+      const fullHash = info.hash;
       const rels: Relationship[] = await json(
-        `/relationships${qs({ to: hash, kind: "tests" })}`,
+        `/relationships${qs({ to: fullHash, kind: "tests" })}`,
       );
       if (rels.length === 0) return [];
       const testHashes = rels.map((r) => r.from);
@@ -833,7 +836,7 @@ ${scriptBody}
           runnerPath,
           "--",
           base,
-          hash,
+          fullHash,
           testHashes.join(","),
         ],
         stdout: "piped",
