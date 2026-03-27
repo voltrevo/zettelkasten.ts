@@ -56,6 +56,7 @@ const args = parseArgs(Deno.args, {
     "dir",
     "entries",
     "supersedes",
+    "summary-model",
   ],
   boolean: [
     "f",
@@ -1838,6 +1839,7 @@ function workerConfig(): WorkerConfig {
     once: args.once ?? false,
     dangerouslySkipPermissions: args["dangerously-skip-permissions"] ?? false,
     model: args.model,
+    summaryModel: args["summary-model"],
     serverUrl: cfg.serverUrl,
     devToken: cfg.devToken,
     promptFile: args["prompt-file"],

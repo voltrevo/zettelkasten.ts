@@ -17,6 +17,7 @@ export interface WorkerConfig {
   serverUrl: string;
   devToken: string;
   model?: string; // agent model (e.g. "sonnet", "opus")
+  summaryModel?: string; // model for log summaries (default "haiku")
   // Override prompt files (read from disk instead of server)
   promptFile?: string;
   retrospectivePromptFile?: string;
@@ -703,6 +704,49 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       console.log(
         `[iter ${iter}] exit ${code} (${durationSec}s)`,
       );
+
+      // Summarize the pretty log
+      try {
+        const prettyContent = await Deno.readTextFile(prettyPath);
+        if (prettyContent.trim()) {
+          const summaryModel = config.summaryModel ?? "haiku";
+          console.log(`[iter ${iter}] summarizing log (${summaryModel})...`);
+          const summaryProc = new Deno.Command("claude", {
+            args: [
+              "--model",
+              summaryModel,
+              "--max-turns",
+              "1",
+              "--output-format",
+              "text",
+              "-p",
+              "Summarize what happened in this agent iteration." +
+              " Be factual and concise: what was built, what commands were run," +
+              " what errors occurred, what was the outcome." +
+              " Do not editorialize.\n\n" + prettyContent,
+            ],
+            stdout: "piped",
+            stderr: "piped",
+          });
+          const summaryOutput = await summaryProc.output();
+          if (summaryOutput.code === 0) {
+            const summary = new TextDecoder().decode(summaryOutput.stdout);
+            await Deno.writeTextFile(
+              `${iterLogDir}/log-summary.md`,
+              summary,
+            );
+            console.log(`[iter ${iter}] log summary written`);
+          } else {
+            console.warn(
+              `[iter ${iter}] log summary failed (exit ${summaryOutput.code})`,
+            );
+          }
+        }
+      } catch (e) {
+        console.warn(
+          `[iter ${iter}] log summary error: ${(e as Error).message}`,
+        );
+      }
 
       // Move tmp.md → history/<iter>.md
       try {
