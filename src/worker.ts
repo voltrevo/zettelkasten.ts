@@ -604,7 +604,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                     const input = block.input ?? {};
                     if (block.name === "Bash" && input.command) {
                       emitLn(
-                        `  ${C.bold}${C.green}$ ${input.command}${C.reset}`,
+                        `  ${C.bold}${C.green}$ ${midTrunc(input.command, 200)}${C.reset}`,
                       );
                     } else if (block.name === "Write" && input.file_path) {
                       emitLn(
@@ -650,7 +650,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                   if (block.type === "thinking" && block.thinking?.trim()) {
                     emitLn(
                       `  ${C.gray}thinking: ${
-                        midTrunc(block.thinking.trim(), 120)
+                        midTrunc(block.thinking.trim(), 240)
                       }${C.reset}`,
                     );
                     lastWasTool = true;
