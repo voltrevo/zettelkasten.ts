@@ -114,8 +114,9 @@ export async function readIteration(config: WorkerConfig): Promise<number> {
       `${channelDir(config)}/.iteration`,
     );
     return parseInt(content.trim(), 10) || 0;
-  } catch {
-    return 0;
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return 0;
+    throw e;
   }
 }
 
@@ -322,28 +323,41 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       // Pick a goal for this iteration
       let goalText = "(No open goals)";
       let goalName = "";
+      let goals;
       try {
-        const goals = await client.listGoals();
-        if (goals.length === 0) {
-          console.log("[worker] No open goals, stopping.");
+        goals = await client.listGoals();
+      } catch (e) {
+        console.warn(
+          `[worker] server unreachable: ${(e as Error).message}, backing off 30s`,
+        );
+        await new Promise((r) => setTimeout(r, 30_000));
+        continue;
+      }
+      if (goals.length === 0) {
+        console.log("[worker] No open goals, stopping.");
+        break;
+      }
+      // Weighted random pick
+      const totalWeight = goals.reduce((s, g) => s + g.weight, 0);
+      let r = Math.random() * totalWeight;
+      let picked = goals[0];
+      for (const g of goals) {
+        r -= g.weight;
+        if (r <= 0) {
+          picked = g;
           break;
         }
-        // Weighted random pick
-        const totalWeight = goals.reduce((s, g) => s + g.weight, 0);
-        let r = Math.random() * totalWeight;
-        let picked = goals[0];
-        for (const g of goals) {
-          r -= g.weight;
-          if (r <= 0) {
-            picked = g;
-            break;
-          }
-        }
-        goalName = picked.name;
+      }
+      goalName = picked.name;
+      try {
         const detail = await client.getGoal(goalName);
         goalText = formatGoalText(detail);
-      } catch {
-        // Server unreachable — proceed anyway, agent will fail naturally
+      } catch (e) {
+        console.warn(
+          `[worker] failed to fetch goal "${goalName}": ${(e as Error).message}, backing off 30s`,
+        );
+        await new Promise((r) => setTimeout(r, 30_000));
+        continue;
       }
 
       iter++;
@@ -518,7 +532,11 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                   }
                 }
               }
-            } catch { /* skip */ }
+            } catch (e) {
+              console.warn(
+                `[iter ${iter}] malformed stream line: ${(e as Error).message}`,
+              );
+            }
           }
         }
       } finally {
@@ -587,10 +605,14 @@ export async function stopWorker(config: WorkerConfig): Promise<void> {
     console.log(`Sent SIGTERM to worker PID ${pid}`);
     // Wait briefly for cleanup
     await new Promise((r) => setTimeout(r, 2000));
-    await Deno.remove(pidFile).catch(() => {});
+    await Deno.remove(pidFile).catch((e) =>
+      console.warn(`warning: failed to remove ${pidFile}: ${e.message}`),
+    );
     console.log("Worker stopped.");
   } catch {
     console.warn(`Process ${pid} not found, cleaning up stale PID file`);
-    await Deno.remove(pidFile).catch(() => {});
+    await Deno.remove(pidFile).catch((e) =>
+      console.warn(`warning: failed to remove ${pidFile}: ${e.message}`),
+    );
   }
 }
