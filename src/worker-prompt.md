@@ -205,15 +205,18 @@ behavior. If the goal has tags:
     run(target: ...): void { ... }
   }
   ```
+- **The goal spec is the source of truth.** The spec describes what the code
+  should do, not what existing code happens to do. If existing atoms don't
+  match the spec, they need to be fixed or replaced — no matter how much
+  change is required. Use `--supersedes` to build corrected versions.
 - **The test must actually verify the behavior described by the tag.** A tag
   that says "error at line 4" requires the test to assert the line number is 4,
-  not just that an error occurred. A weaker test that doesn't verify what the
+  not just that an error occurred. If the current implementation doesn't produce
+  line numbers, the implementation needs to be fixed — writing a weaker test
+  that skips the check is not acceptable. A test that doesn't verify what the
   tag describes is worse than no test — it gives false confidence. If you can't
-  write a test that verifies the full requirement, leave the tag uncovered and
-  explain why in your summary.
-- If a spec requirement can't be met because a dependency has a bug, fix the
-  dependency. Use `--supersedes` to build a corrected version. Just because
-  you didn't write the broken atom doesn't mean you shouldn't fix it.
+  meet a requirement in this iteration, leave the tag uncovered and explain
+  what needs to change in your summary.
 - Check coverage with `zts goal coverage <goal> --entries <hash1>,<hash2>,...`
   to see which tags your dependency tree covers vs which are missing.
 - Some tags describe behavior that can only be verified interactively (e.g. real
