@@ -220,6 +220,9 @@ Each iteration, you build ONE well-tested atom that advances your goal — or yo
 build nothing and explain why. It is always better to build nothing than to
 build something you aren't confident in.
 
+"One atom" means one value atom plus as many test atoms as needed to cover it
+thoroughly. Tests don't count toward the one — they're part of building it well.
+
 Here's a complete example. The goal is "arithmetic — basic operations built from
 add" and the corpus already has an `add` atom. This example is deliberately
 simplified — in real work you would use the `*` operator, not rebuild
