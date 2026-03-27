@@ -1379,7 +1379,7 @@ async function cmdGoalCoverage(
   if (covered.length > 0) {
     console.log(`Covered (${covered.length}/${goalTags.size}):`);
     for (const tag of covered) {
-      console.log(`  ${tag}  ${coveredTags.get(tag)}`);
+      console.log(`  [${tag}]  ${coveredTags.get(tag)}`);
     }
     console.log();
   }
@@ -1387,7 +1387,7 @@ async function cmdGoalCoverage(
   if (missing.length > 0) {
     console.log(`Missing (${missing.length}/${goalTags.size}):`);
     for (const tag of missing) {
-      console.log(`  ${tag}  (${goalTags.get(tag)})`);
+      console.log(`  [${tag}]  (${goalTags.get(tag)})`);
     }
   }
 

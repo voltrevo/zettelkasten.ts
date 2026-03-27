@@ -191,6 +191,27 @@ Hash prefixes work everywhere (e.g. `zts info 3ax9`). Relationship kinds:
 - When a goal is complete: `zts goal comment <name> "DONE: <what was achieved>"`
   then `zts goal done <name>`
 
+## Spec tags and coverage
+
+Some goals contain tagged requirements — backtick-wrapped identifiers starting
+with `§`, like `[§c32-sort-28f6sz7]`. Each tag defines a specific testable
+behavior. If the goal has tags:
+
+- Write test atoms whose `static name` starts with the tag:
+  ```typescript
+  export class Test {
+    static name = "[§c32-sort-28f6sz7] sort_test returns 12345";
+    run(target: ...): void { ... }
+  }
+  ```
+- Check coverage with `zts goal coverage <goal> --entries <hash1>,<hash2>,...`
+  to see which tags your dependency tree covers vs which are missing.
+- Some tags describe behavior that can only be verified interactively (e.g.
+  real network tests). Document those results in a goal comment.
+
+Not all goals use tags. If the goal has no `§` markers, the standard workflow
+applies — write tests as usual.
+
 ---
 
 ## Workflow
