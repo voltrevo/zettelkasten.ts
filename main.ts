@@ -77,6 +77,13 @@ const args = parseArgs(Deno.args, {
     t: "tests",
     g: "goal",
   },
+  unknown: (flag) => {
+    if (flag.startsWith("-")) {
+      console.error(`error: unknown flag: ${flag}`);
+      Deno.exit(1);
+    }
+    return true; // allow positional args
+  },
 });
 
 // ---- Config & client setup ----
