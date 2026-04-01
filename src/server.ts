@@ -1921,6 +1921,102 @@ async function route(req: Request): Promise<Response> {
     }
   }
 
+  // --- Tasks ---
+
+  // GET /goals/<name>/tasks — list tasks
+  {
+    const m = path.match(/^\/goals\/([a-zA-Z0-9_-]+)\/tasks$/);
+    if (m && req.method === "GET") {
+      try {
+        const tasks = db.listTasks(m[1]);
+        return Response.json(tasks);
+      } catch (e) {
+        return new Response((e as Error).message, { status: 404 });
+      }
+    }
+
+    // POST /goals/<name>/tasks — create task [dev]
+    if (m && req.method === "POST") {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
+      const body = await req.json() as {
+        title: string;
+        parentId?: string;
+        description?: string;
+      };
+      if (!body.title) {
+        return new Response("title is required", { status: 400 });
+      }
+      try {
+        const task = db.addTask(m[1], body.title, body.parentId, body.description);
+        return Response.json(task, { status: 201 });
+      } catch (e) {
+        return new Response((e as Error).message, { status: 404 });
+      }
+    }
+  }
+
+  // GET /goals/<name>/tasks/pick — pick next task [dev]
+  {
+    const m = path.match(/^\/goals\/([a-zA-Z0-9_-]+)\/tasks\/pick$/);
+    if (m && req.method === "GET") {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
+      try {
+        const task = db.pickTask(m[1]);
+        if (!task) {
+          return new Response("no tasks", { status: 404 });
+        }
+        return Response.json(task);
+      } catch (e) {
+        return new Response((e as Error).message, { status: 404 });
+      }
+    }
+  }
+
+  // PATCH /tasks/<id> — edit task [dev]
+  {
+    const m = path.match(/^\/tasks\/([a-z0-9]{7})$/);
+    if (m && req.method === "PATCH") {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
+      const body = await req.json() as {
+        title?: string;
+        description?: string;
+      };
+      if (!db.updateTask(m[1], body)) {
+        return new Response("Task not found", { status: 404 });
+      }
+      return Response.json(db.getTask(m[1]));
+    }
+  }
+
+  // DELETE /tasks/<id> — delete task [dev]
+  {
+    const m = path.match(/^\/tasks\/([a-z0-9]{7})$/);
+    if (m && req.method === "DELETE") {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
+      if (!db.deleteTask(m[1])) {
+        return new Response("Task not found", { status: 404 });
+      }
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  // POST /tasks/<id>/done — mark task done [dev]
+  {
+    const m = path.match(/^\/tasks\/([a-z0-9]{7})\/done$/);
+    if (m && req.method === "POST") {
+      const authErr = requireAuth(req, "dev");
+      if (authErr) return authErr;
+      if (!db.markTaskDone(m[1])) {
+        return new Response("Task not found", { status: 404 });
+      }
+      return new Response("ok\n");
+    }
+  }
+
   return new Response("Not found", { status: 404 });
 }
 

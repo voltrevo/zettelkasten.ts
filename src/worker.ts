@@ -142,6 +142,7 @@ export interface BuildPromptOpts {
   serverUrl: string;
   workspaceDir: string;
   goalText: string;
+  taskText: string;
   iter: number;
   channel: string;
   isRetrospective: boolean;
@@ -173,7 +174,8 @@ export async function buildPrompt(
     .replace(/\{\{server-url\}\}/g, serverUrl)
     .replace(/\{\{workspace\}\}/g, workspaceDir)
     .replace(/\{\{summary\}\}/g, summaryRef)
-    .replace(/\{\{goal\}\}/g, goalText);
+    .replace(/\{\{goal\}\}/g, goalText)
+    .replace(/\{\{task\}\}/g, opts.taskText);
 
   prompt += `\n\nCurrent iteration: ${iter}\nChannel: ${channel}\n`;
   if (isRetrospective) {
@@ -415,6 +417,39 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         continue;
       }
 
+      // Pick task (or set planning mode)
+      let taskText: string;
+      try {
+        const task = await client.pickTask(goalName);
+        if (task) {
+          taskText =
+            `**${task.id}: ${task.title}**\n\n` +
+            (task.description
+              ? task.description + "\n\n"
+              : "") +
+            `Complete this task. Draft, test, and publish the atom(s) needed,` +
+            ` then mark it done with \`zts task done ${task.id}\`.\n\n` +
+            `One atom at a time. Never have more than two unpublished drafts.` +
+            ` If this task requires changing multiple atoms in a dependency` +
+            ` chain, build from the leaves up.\n\n` +
+            `Use \`zts task list ${goalName}\` to see the full task tree.`;
+        } else {
+          // No tasks yet — agent should create the breakdown
+          taskText =
+            `No tasks exist for this goal yet.\n\n` +
+            `Your job this iteration is to **plan**: read the goal spec,` +
+            ` check current coverage (\`zts goal coverage ${goalName}` +
+            ` --entries <hash>\`), and break the remaining work into ordered` +
+            ` tasks using \`zts task add\`.\n\n` +
+            `Keep each task small enough to draft-test-publish in a single` +
+            ` iteration. Order them so leaves come before parents. Nest` +
+            ` related tasks with \`--parent <id>\`.\n\n` +
+            `Do not draft or publish atoms this iteration — just plan.`;
+        }
+      } catch {
+        taskText = "(task system unavailable)";
+      }
+
       iter++;
       const isRetrospective = iter > 0 && iter % RETROSPECTIVE_INTERVAL === 0;
       const mode = isRetrospective ? "retrospective" : "build";
@@ -456,6 +491,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
         serverUrl: config.serverUrl,
         workspaceDir: absDir,
         goalText,
+        taskText,
         iter,
         channel: config.channel,
         isRetrospective,

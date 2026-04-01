@@ -144,6 +144,16 @@ export interface GoalComment {
   createdAt: string;
 }
 
+export interface Task {
+  id: string;
+  goalName: string;
+  parentId: string | null;
+  title: string;
+  description: string;
+  done: boolean;
+  createdAt: string;
+}
+
 // ---- Draft/Publish result types ----
 
 export interface MigratedTest {
@@ -294,6 +304,21 @@ export interface ZtsClient {
   deleteGoalComment(name: string, id: number): Promise<void>;
   goalFiles(name: string): Promise<string[]>;
   goalFile(name: string, path: string): Promise<string>;
+
+  // Tasks
+  listTasks(goalName: string): Promise<Task[]>;
+  addTask(
+    goalName: string,
+    title: string,
+    opts?: { parentId?: string; description?: string },
+  ): Promise<Task>;
+  markTaskDone(id: string): Promise<void>;
+  deleteTask(id: string): Promise<void>;
+  updateTask(
+    id: string,
+    updates: { title?: string; description?: string },
+  ): Promise<Task>;
+  pickTask(goalName: string): Promise<Task | null>;
 
   // Prompts
   getPrompt(name: string, defaultOnly?: boolean): Promise<PromptResult>;
@@ -641,6 +666,41 @@ function buildClient(
       );
       if (!res.ok) throw new ApiError(res.status, await res.text());
       return res.text();
+    },
+
+    // Tasks
+    listTasks: (goalName) =>
+      json(`/goals/${encodeURIComponent(goalName)}/tasks`),
+
+    addTask: (goalName, title, opts = {}) =>
+      json(`/goals/${encodeURIComponent(goalName)}/tasks`, {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          parentId: opts.parentId,
+          description: opts.description,
+        }),
+        headers: { "content-type": "application/json" },
+      }),
+
+    markTaskDone: (id) => ok(`/tasks/${id}/done`, { method: "POST" }),
+
+    deleteTask: (id) => ok(`/tasks/${id}`, { method: "DELETE" }),
+
+    updateTask: (id, updates) =>
+      json(`/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(updates),
+        headers: { "content-type": "application/json" },
+      }),
+
+    pickTask: async (goalName) => {
+      const res = await transport.fetch(
+        `/goals/${encodeURIComponent(goalName)}/tasks/pick`,
+      );
+      if (res.status === 404) return null;
+      if (!res.ok) throw new ApiError(res.status, await res.text());
+      return res.json();
     },
 
     // Prompts

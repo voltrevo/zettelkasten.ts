@@ -57,6 +57,9 @@ const args = parseArgs(Deno.args, {
     "entries",
     "supersedes",
     "summary-model",
+    "parent",
+    "title",
+    "description",
   ],
   boolean: [
     "f",
@@ -653,6 +656,10 @@ switch (command) {
     await cmdGoal(rest);
     break;
 
+  case "task":
+    await cmdTask(rest);
+    break;
+
   case "admin":
     await cmdAdmin(rest);
     break;
@@ -761,6 +768,16 @@ Goals:
   goal file <name> <path>      read a single goal file
   goal coverage <name> --entries <h1>,<h2>
                                check § tag coverage from atom tree
+
+Tasks:
+  task add <goal> <title> [--parent <id>] [--description <text>]
+                               create a subtask under a goal
+  task list <goal>             show task tree
+  task done <id>               mark task complete
+  task rm <id>                 delete task (and children)
+  task edit <id> [--title <text>] [--description <text>]
+                               update a task
+  task pick <goal>             next task to work on (deepest unfinished leaf)
 
 Admin:
   admin goal add <name> [--weight N] [--body <text>] [--dir <path>]
@@ -1439,6 +1456,107 @@ async function cmdGoalCoverage(
   if (missing.length === 0) {
     console.log("All tags covered.");
   }
+}
+
+async function cmdTask(rest: string[]): Promise<void> {
+  const sub = rest[0];
+  const goalName = rest[1];
+
+  if (sub === "add") {
+    if (!goalName || !rest[2]) {
+      console.error(
+        "usage: zts task add <goal> <title> [--parent <id>] [--description <text>]",
+      );
+      Deno.exit(1);
+    }
+    const title = rest[2];
+    const task = await client.addTask(goalName, title, {
+      parentId: args.parent ? String(args.parent) : undefined,
+      description: args.description ? String(args.description) : undefined,
+    });
+    console.log(`${task.id}: ${task.title}`);
+    return;
+  }
+
+  if (sub === "list") {
+    if (!goalName) {
+      console.error("usage: zts task list <goal>");
+      Deno.exit(1);
+    }
+    const tasks = await client.listTasks(goalName);
+    if (tasks.length === 0) {
+      console.log("no tasks");
+      return;
+    }
+    const children = new Map<string | null, typeof tasks>();
+    for (const t of tasks) {
+      const key = t.parentId;
+      if (!children.has(key)) children.set(key, []);
+      children.get(key)!.push(t);
+    }
+    const printTree = (parentId: string | null, indent: number) => {
+      for (const t of children.get(parentId) ?? []) {
+        const mark = t.done ? "[x]" : "[ ]";
+        console.log(`${"  ".repeat(indent)}${mark} ${t.id}: ${t.title}`);
+        printTree(t.id, indent + 1);
+      }
+    };
+    printTree(null, 0);
+    return;
+  }
+
+  if (sub === "done") {
+    if (!goalName) {
+      console.error("usage: zts task done <task-id>");
+      Deno.exit(1);
+    }
+    await client.markTaskDone(goalName);
+    console.log("done");
+    return;
+  }
+
+  if (sub === "rm" || sub === "delete") {
+    if (!goalName) {
+      console.error("usage: zts task rm <task-id>");
+      Deno.exit(1);
+    }
+    await client.deleteTask(goalName);
+    console.log("deleted");
+    return;
+  }
+
+  if (sub === "edit") {
+    if (!goalName) {
+      console.error(
+        "usage: zts task edit <task-id> [--title <text>] [--description <text>]",
+      );
+      Deno.exit(1);
+    }
+    const updates: { title?: string; description?: string } = {};
+    if (args.title) updates.title = String(args.title);
+    if (args.description) updates.description = String(args.description);
+    const task = await client.updateTask(goalName, updates);
+    console.log(`${task.id}: ${task.title}`);
+    return;
+  }
+
+  if (sub === "pick") {
+    if (!goalName) {
+      console.error("usage: zts task pick <goal>");
+      Deno.exit(1);
+    }
+    const task = await client.pickTask(goalName);
+    if (!task) {
+      console.log("no tasks");
+      return;
+    }
+    console.log(`${task.id}: ${task.title}`);
+    if (task.description) console.log(task.description);
+    return;
+  }
+
+  console.error("usage: zts task <add|list|done|pick> ...");
+  Deno.exit(1);
 }
 
 async function cmdGoal(rest: string[]): Promise<void> {

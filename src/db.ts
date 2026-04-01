@@ -1,7 +1,7 @@
 import { Database } from "@db/sqlite";
 import { parseZip } from "./bundle.ts";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -188,6 +188,16 @@ export interface GoalComment {
   createdAt: string;
 }
 
+export interface Task {
+  id: string; // 7-char random base36
+  goalName: string;
+  parentId: string | null;
+  title: string;
+  description: string;
+  done: boolean;
+  createdAt: string;
+}
+
 export interface LogEntry {
   op: string;
   subject?: string;
@@ -332,6 +342,26 @@ export class Db {
       this.db.exec("ALTER TABLE goals ADD COLUMN files BLOB");
       this.db.prepare("UPDATE schema_version SET version = ?").run(5);
       console.log("Schema v5 migration complete.");
+    }
+
+    if (fromVersion < 6) {
+      // v5→v6: add tasks table for agent-created subgoals
+      console.log("Migrating schema v5 → v6...");
+      // Drop any stale tasks table from earlier schema attempts
+      this.db.exec("DROP TABLE IF EXISTS tasks");
+      this.db.exec(`
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY,
+          goal_name TEXT NOT NULL REFERENCES goals(name) ON DELETE CASCADE,
+          parent_id TEXT REFERENCES tasks(id),
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          done INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      this.db.prepare("UPDATE schema_version SET version = ?").run(6);
+      console.log("Schema v6 migration complete.");
     }
   }
 
@@ -1228,6 +1258,164 @@ export class Db {
       "SELECT 1 FROM goals WHERE name = ?",
     ).get<{ "1": number }>(name);
     return row !== undefined;
+  }
+
+  // --- Tasks ---
+
+  private generateTaskId(): string {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const bytes = new Uint8Array(4);
+      crypto.getRandomValues(bytes);
+      const id = Array.from(bytes)
+        .map((b) => b.toString(36).padStart(2, "0"))
+        .join("")
+        .slice(0, 7);
+      const exists = this.db.prepare("SELECT 1 FROM tasks WHERE id = ?")
+        .get<{ "1": number }>(id);
+      if (!exists) return id;
+    }
+    throw new Error("Failed to generate unique task ID");
+  }
+
+  private rowToTask(row: {
+    id: string;
+    goal_name: string;
+    parent_id: string | null;
+    title: string;
+    description: string;
+    done: number;
+    created_at: string;
+  }): Task {
+    return {
+      id: row.id,
+      goalName: row.goal_name,
+      parentId: row.parent_id,
+      title: row.title,
+      description: row.description,
+      done: row.done === 1,
+      createdAt: row.created_at,
+    };
+  }
+
+  private taskRow() {
+    return {} as {
+      id: string;
+      goal_name: string;
+      parent_id: string | null;
+      title: string;
+      description: string;
+      done: number;
+      created_at: string;
+    };
+  }
+
+  addTask(
+    goalName: string,
+    title: string,
+    parentId?: string,
+    description?: string,
+  ): Task {
+    if (!this.goalExists(goalName)) {
+      throw new Error(`Goal not found: ${goalName}`);
+    }
+    if (parentId !== undefined) {
+      const parent = this.db.prepare("SELECT id FROM tasks WHERE id = ?")
+        .get<{ id: string }>(parentId);
+      if (!parent) throw new Error(`Parent task not found: ${parentId}`);
+    }
+    const id = this.generateTaskId();
+    this.db.prepare(
+      "INSERT INTO tasks (id, goal_name, parent_id, title, description) VALUES (?, ?, ?, ?, ?)",
+    ).run(id, goalName, parentId ?? null, title, description ?? "");
+    return this.getTask(id)!;
+  }
+
+  listTasks(goalName: string): Task[] {
+    if (!this.goalExists(goalName)) {
+      throw new Error(`Goal not found: ${goalName}`);
+    }
+    const rows = this.db.prepare(
+      "SELECT * FROM tasks WHERE goal_name = ? ORDER BY created_at, id",
+    ).all<ReturnType<typeof this.taskRow>>(goalName);
+    return rows.map((r) => this.rowToTask(r));
+  }
+
+  getTask(id: string): Task | null {
+    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?")
+      .get<ReturnType<typeof this.taskRow>>(id);
+    return row ? this.rowToTask(row) : null;
+  }
+
+  markTaskDone(id: string): boolean {
+    return this.db.prepare("UPDATE tasks SET done = 1 WHERE id = ?").run(
+      id,
+    ) > 0;
+  }
+
+  updateTask(
+    id: string,
+    updates: { title?: string; description?: string },
+  ): boolean {
+    const parts: string[] = [];
+    const vals: (string | number | null)[] = [];
+    if (updates.title !== undefined) {
+      parts.push("title = ?");
+      vals.push(updates.title);
+    }
+    if (updates.description !== undefined) {
+      parts.push("description = ?");
+      vals.push(updates.description);
+    }
+    if (parts.length === 0) return false;
+    vals.push(id);
+    return this.db.prepare(
+      `UPDATE tasks SET ${parts.join(", ")} WHERE id = ?`,
+    ).run(...vals) > 0;
+  }
+
+  deleteTask(id: string): boolean {
+    const children = this.db.prepare(
+      "SELECT id FROM tasks WHERE parent_id = ?",
+    ).all<{ id: string }>(id);
+    if (children.length > 0) {
+      throw new Error(
+        `Cannot delete: task has ${children.length} child task(s). Delete children first.`,
+      );
+    }
+    return this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id) > 0;
+  }
+
+  /**
+   * Pick the next task to work on: deepest unfinished leaf whose earlier
+   * siblings are all done. Walk depth-first by creation order.
+   */
+  pickTask(goalName: string): Task | null {
+    const tasks = this.listTasks(goalName);
+    if (tasks.length === 0) return null;
+
+    const children = new Map<string | null, Task[]>();
+    for (const t of tasks) {
+      const key = t.parentId;
+      if (!children.has(key)) children.set(key, []);
+      children.get(key)!.push(t);
+    }
+
+    const pick = (parentId: string | null): Task | null => {
+      const kids = children.get(parentId) ?? [];
+      for (const t of kids) {
+        if (t.done) continue;
+        const grandkids = children.get(t.id) ?? [];
+        const hasUndoneChildren = grandkids.some((g) => !g.done);
+        if (hasUndoneChildren) {
+          const deeper = pick(t.id);
+          if (deeper) return deeper;
+        }
+        return t;
+      }
+      return null;
+    };
+
+    return pick(null);
   }
 
   // --- Prompts ---

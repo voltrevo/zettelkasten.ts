@@ -247,217 +247,108 @@ cleanly.
 
 ## Workflow
 
-Each iteration, you build ONE well-tested atom that advances your goal — or you
-build nothing and explain why. It is always better to build nothing than to
-build something that might be wrong.
+You are one agent among many. Other agents will continue the work after you.
+Your scope is **one task** — complete it well and stop. Leave remaining tasks
+for other agents.
 
-"One atom" means one value atom plus as many test atoms as needed to cover it
-thoroughly. Tests don't count toward the one — they're part of building it well.
+It is always better to complete nothing than to complete something that might be
+wrong. If you can't finish your task, explain what blocked you in your summary
+so the next agent can pick up.
 
-Here's a complete example. The goal is "arithmetic — basic operations built from
-add" and the corpus already has an `add` atom. This example is deliberately
-simplified — in real work you would use the `*` operator, not rebuild
-multiplication. The "build, don't import" rule above applies only to the
-specific platform APIs listed (crypto, compression, etc.), not to basic language
-operations. All hashes below are illustrative.
+### Step 1: Check your task
 
-### 1. Decide what to build
+Your task is shown in the "Your task" section at the bottom. Before diving in:
 
-The goal needs multiply, power, and factorial. Multiply is the natural first
-step — power and factorial will need it. Search for an add atom to build on:
+- **If the task section says "No tasks exist"**: your job is to plan. Read the
+  goal spec, check coverage, and create an ordered task breakdown with
+  `zts task add`. Do not build anything — just plan. Other agents will execute.
 
-```
-$ zts search "add two numbers and return the sum"
-qcoe6ps...  0.79  Adds two positive integers and returns their sum
-2m74gz0...  0.78  Adds two numbers and returns their sum. Handles positive, negative, and zero.
-```
+- **If a task is assigned**: consider whether it's small enough to complete.
+  If it would require drafting more than one or two atoms, split it into
+  subtasks with `zts task add <goal> <title> --parent <id>`, then work on
+  only the first subtask.
 
-Top result is `qcoe6p`. Check if there's a better version:
-
-```
-$ zts tops qcoe6p
-Depth 1:
-  2m74gz0...  Adds two numbers and returns their sum. Handles positive, negative, and zero.
+```sh
+zts task list <goal>                              # see full breakdown
+zts task add <goal> <title>                       # create a task
+zts task add <goal> <title> --parent <id>         # nest under another
+zts task edit <id> --title <text>                  # update title
+zts task edit <id> --description <text>            # update description
+zts task done <id>                                # mark complete
 ```
 
-`2m74gz0` supersedes the original — handles negatives. Read it:
+Tasks are a guide, not a contract. As you work you'll learn things that change
+the plan — update tasks freely to reflect reality. Edit titles to be more
+precise, add subtasks when something turns out to be bigger than expected,
+reword descriptions when you understand the problem better. The goal spec is
+the source of truth; tasks are just your current best plan for getting there.
+
+Each task should result in one published atom (plus its tests). Order tasks so
+leaves come before parents — if a feature requires changing multiple atoms,
+give each its own task, bottom-up.
+
+### Step 2: Search and build
+
+Search for existing atoms before writing code:
 
 ```
-$ zts get 2m74gz
-// Adds two numbers and returns the sum, works with negative numbers and zero
-export function add(a: number, b: number): number {
-  return a + b;
-}
+$ zts search "add two numbers"
+2m74gz0...  0.78  Adds two numbers and returns their sum.
+$ zts tops 2m74gz   # check for newer versions
 ```
 
-Simple interface. I'll import this and implement multiply as repeated addition.
-
-### 2. Draft and explore
-
-```
-$ cat ./tmp/multiply.ts
-// Multiplies two integers using repeated addition
-import { add } from "../../2m/74/gz0fta8q91vhhmt9fixg9.ts";
-export function multiply(a: number, b: number): number {
-  const neg = b < 0;
-  if (neg) b = -b;
-  let result = 0;
-  for (let i = 0; i < b; i++) result = add(result, a);
-  return neg ? -result : result;
-}
-```
+Draft your atom, explore interactively, verify outputs against an independent
+source (python, reference implementations, etc.):
 
 ```
-$ zts draft ./tmp/multiply.ts
-1v2vt8u...
-http://{{server-url}}/a/1v/2v/t8uponfx2bg00sllz3ns4.ts
+$ zts draft ./tmp/my-atom.ts
+<hash>
+$ timeout 10 deno run -A ./tmp/explore.ts   # test with real inputs
+$ python3 -c "print(...)"                   # verify expected values
 ```
 
-If your draft is rejected for exceeding the size limit, break it into smaller
-atoms. Pick the most foundational piece — the one other pieces would import —
-and make that your target for this iteration. Note the remaining pieces in your
-summary.
+If your draft is rejected for exceeding the size limit, **split your task** into
+subtasks with `zts task add --parent <id>`. Extract the most foundational piece
+into its own task (the one other pieces would import). Work on that subtask
+only — leave the rest for other agents.
 
-**Splitting is also a debugging strategy.** If something isn't working and you
-can't figure out why, extract the suspicious part into its own atom with its own
-tests. A function that's hard to debug inside a larger atom becomes easy to
-debug when you can test it in isolation. For example, if a DEFLATE decoder fails
-on dynamic Huffman blocks, don't keep rewriting the whole decoder — extract the
-dynamic header parser as a separate atom, test it against known reference
-values, and fix it there. Once the sub-atom works and is published, the parent
-atom simply imports it.
+**Splitting is also a debugging strategy.** If something isn't working, extract
+the suspicious part into its own atom with its own tests. A function that's hard
+to debug inside a larger atom becomes easy when tested in isolation.
 
-Explore with real inputs — use the HTTP URL from the draft output:
+### Step 3: Test
 
 ```
-$ cat ./tmp/explore.ts
-import { multiply } from "http://{{server-url}}/a/1v/2v/t8uponfx2bg00sllz3ns4.ts";
-
-console.log("3 * 4 =", multiply(3, 4));
-console.log("0 * 99 =", multiply(0, 99));
-console.log("-3 * 7 =", multiply(-3, 7));
-console.log("5 * -4 =", multiply(5, -4));
-console.log("137 * 429 =", multiply(137, 429));
+$ zts add-test ./tmp/test.ts --targets <hash>
 ```
 
-```
-$ deno run -A ./tmp/explore.ts
-3 * 4 = 12
-0 * 99 = 0
--3 * 7 = -21
-5 * -4 = -20
-137 * 429 = 58773
-```
+Verify test values against external tools. Do not eyeball outputs. Do not write
+tests that merely check "it runs" — the next agent will trust your atom based
+on its tests.
 
-Verify against an independent source before trusting these as test vectors:
+### Step 4: Publish and mark done
 
 ```
-$ python3 -c "print(3*4, 0*99, -3*7, 5*-4, 137*429)"
-12 0 -21 -20 58773
+$ zts publish <hash> -d "description" -g <goal>
+$ zts task done <task-id>
 ```
 
-All match. 137 * 429 = 58773 is hard to get right by accident.
+If improving an existing atom, use `--supersedes` at draft time. If your
+approach didn't work out, `zts archive <draft-hash>` to clean up.
 
-**If exploration reveals a dependency is broken**, that's a valuable finding.
-Mark it: `zts describe <hash> -d "BROKEN: <what's wrong>. <original desc>"`.
-Check `zts dependents <hash>` and mark any that inherit the breakage. Archive
-your draft, and write a summary explaining what you found. Discovering a broken
-atom is a useful contribution even though you didn't publish anything.
+### Step 5: Write your summary
 
-### 3. Add tests
-
-```
-$ cat ./tmp/multiply-test.ts
-export class Test {
-  static name = "multiply: known products including negatives and zero";
-  run(multiply: (a: number, b: number) => number): void {
-    if (multiply(3, 4) !== 12) throw new Error("3*4");
-    if (multiply(0, 99) !== 0) throw new Error("0*99");
-    if (multiply(-3, 7) !== -21) throw new Error("-3*7");
-    if (multiply(5, -4) !== -20) throw new Error("5*-4");
-    if (multiply(137, 429) !== 58773) throw new Error("137*429");
-    if (multiply(1, 1) !== 1) throw new Error("1*1");
-  }
-}
-```
-
-```
-$ zts add-test ./tmp/multiply-test.ts --targets 1v2vt8u
-q7xrcp2...
-  multiply: known products including negatives and zero
-  1v2vt8u...: PASS
-```
-
-### 4. Publish
-
-```
-$ zts publish 1v2vt8u -d "Multiplies two integers using repeated addition. Handles negative multipliers by negating the result." -g arithmetic
-1v2vt8u...
-http://{{server-url}}/a/1v/2v/t8uponfx2bg00sllz3ns4.ts
-  auto-published 1 test(s)
-```
-
-**If your atom improves on an existing one**, use `--supersedes` at draft time:
-
-```
-$ zts draft ./tmp/multiply.ts --supersedes qcoe6p
-1v2vt8u...
-
-Migrating tests from qcoe6p...
-  q7xrcp2  PASS  "multiply: known products"     → inherited
-  a3b9f1k  PASS  "multiply: zero"               → inherited
-  x8m2j4p  FAIL  "multiply: negative overflow"
-    expected -2147483648, got 0
-
-2/3 tests inherited. 1 test does not pass against this draft.
-Note: this is expected when superseding atoms diverge on purpose.
-```
-
-Tests that pass are automatically linked to your draft. Tests that fail are
-shown for your information — this is normal when the new atom intentionally
-changes behavior. The `supersedes` relationship is created automatically at
-publish time. `zts tops <hash>` walks the supersedes chain to find the current
-best. Always check `zts search` / `zts tops` before building — if a working
-version exists, build on it or supersede it rather than starting from scratch.
-
-If your approach didn't work out at any point, archive your drafts to clean up:
-
-```
-zts archive <draft-hash>
-```
-
-Unarchived drafts are cleaned up automatically after a day, so this is good
-practice but not required.
-
-### 5. Write your summary
-
-Write your summary to `{{workspace}}/summary/tmp.md`. The system moves this file
-to `summary/history/<iter>.md` after each iteration.
-
-Include:
-
-- What you built (hash + description), or what you tried and why it failed
-- Why you're confident it's correct (what do the tests prove?)
-
-Example:
-
-> Built multiply (1v2vt8u...) — multiplies two integers via repeated addition,
-> importing the add atom. Handles negative multipliers.
->
-> Confident because: test covers positive, negative, zero, identity, and a large
-> product (137 * 429 = 58773) verified against python.
->
-> Next useful atom: power — raise a base to an exponent using repeated
-> multiplication.
-
-This summary is context for future iterations, not a contract. The next agent is
-not obligated to follow your plan — they'll make their own decision. But your
-observations and confidence argument are valuable input.
+Write to `{{workspace}}/summary/tmp.md`. Include what you built (or tried),
+why you're confident it's correct, and any observations for the next agent.
 
 {{summary}}
 
 ---
 
-## Your goal
+## Goal
 
 {{goal}}
+
+## Your task
+
+{{task}}
