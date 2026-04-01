@@ -100,10 +100,23 @@ export function validateAtom(
   // Token count check (comments excluded)
   const tokens = countTokens(source);
   if (tokens > MAX_TOKENS) {
-    errors.push(
-      `atom is ${tokens} tokens; limit is ${MAX_TOKENS}. ` +
-        `Comments don't count. Split into smaller atoms instead.`,
-    );
+    const isTest = isTestAtom(source);
+
+    if (isTest) {
+      errors.push(
+        `Test atom is ${tokens} tokens; limit is ${MAX_TOKENS}. ` +
+          `Comments don't count. Split into smaller atoms instead.`,
+      );
+    } else {
+      errors.push(
+        `Atom is ${tokens} tokens; limit is ${MAX_TOKENS}. ` +
+          `This probably means you are trying to build too much, even if ` +
+          `you've only slightly exceeded the limit. Smaller atoms are ` +
+          `better. Split the design at natural boundaries and narrow your ` +
+          `scope to only one of the subatoms. Remember: build ONE ` +
+          `well-tested value atom only.`,
+      );
+    }
   }
 
   return errors.length > 0 ? { message: errors.join("; ") } : null;

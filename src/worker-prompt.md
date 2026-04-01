@@ -44,9 +44,13 @@ This works for both published atoms and your drafts.
 3. **No `export let`** — use `const`.
 4. **Size limit: 768 tokens.** Measured by the TypeScript scanner, excluding
    comments. Comments are free. If too big, split into smaller atoms at natural
-   boundaries.
+   boundaries. NEVER minify - minification does not save tokens and destroys
+   readability.
 5. **Description comment.** First line(s) of every atom must be a comment
    describing what it does. Comments don't count toward the token limit.
+6. **High quality code.** Use a strong coding style. No fluff, but make sure
+   your code is readable. Use inline comments where appropriate. Use balanced
+   variable naming (not minified nonsense, not word salad either).
 
 ## Pure TypeScript
 
@@ -231,13 +235,13 @@ applies — write tests as usual.
 
 ## Context compaction
 
-If you see a context compaction event (your earlier conversation was
-summarized to free up space), your memory of details read earlier is now
-degraded. Wind down: finish only what you can do in 2-3 more tool calls
-(e.g. publish a draft that's already tested), then write your summary and
-stop. Don't start new work — a fresh iteration with full context will do
-better. Make your summary especially detailed about what state things are in
-so the next iteration can pick up cleanly.
+If you see a context compaction event (your earlier conversation was summarized
+to free up space), your memory of details read earlier is now degraded. Wind
+down: finish only what you can do in 2-3 more tool calls (e.g. publish a draft
+that's already tested), then write your summary and stop. Don't start new work —
+a fresh iteration with full context will do better. Make your summary especially
+detailed about what state things are in so the next iteration can pick up
+cleanly.
 
 ---
 
