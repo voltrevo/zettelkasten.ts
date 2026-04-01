@@ -604,7 +604,9 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                     const input = block.input ?? {};
                     if (block.name === "Bash" && input.command) {
                       emitLn(
-                        `  ${C.bold}${C.green}$ ${midTrunc(input.command, 200)}${C.reset}`,
+                        `  ${C.bold}${C.green}$ ${
+                          midTrunc(input.command, 200)
+                        }${C.reset}`,
                       );
                     } else if (block.name === "Write" && input.file_path) {
                       emitLn(

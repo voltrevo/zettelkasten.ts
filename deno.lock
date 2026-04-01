@@ -112,7 +112,10 @@
     "http://localhost:7483/a/48/yh/5jn0jor4m0cdp3zrx7g9s.ts": "70ee6ecf32e103d81c96e21e76abff83d8f82c453b46511f142bd5f29a5c75ab",
     "http://localhost:7483/a/4s/w2/1x146ptufi4xbxvzim5qj.ts": "7e3566fd45dfe4ac936f464c02c5325a77e80ea1958d59d36846c158041b9bb6",
     "http://localhost:7483/a/c7/4v/wep3v1pmgoxh2b5xejrg2.ts": "3c4a2e2a0a6bf84c5e216d11281fd0f54041f853bf9aa9fb1530f3e469cfbdb8",
-    "http://localhost:7483/a/jd/b8/q3h0yvuoy387m5epeyivd.ts": "82a1db5926be5bf2b4fd3021e94a7854f1c28c8c1fb51ce97d8050c1777d80cb"
+    "http://localhost:7483/a/jd/b8/q3h0yvuoy387m5epeyivd.ts": "82a1db5926be5bf2b4fd3021e94a7854f1c28c8c1fb51ce97d8050c1777d80cb",
+    "https://gist.githubusercontent.com/voltrevo/9b43879241ac741454bc18561bd50855/raw/sieve.ts": "da66150a5cf38326307a12e2cf895c919a4c3543cc42b6de148a6641033b1555",
+    "https://gist.githubusercontent.com/voltrevo/b67531a2f295b3e12b7aefaab36afb05/raw/sieve.ts": "da66150a5cf38326307a12e2cf895c919a4c3543cc42b6de148a6641033b1555",
+    "https://gist.githubusercontent.com/voltrevo/c9ac802608c5fa259944429ed3bbd80f/raw/gist-test.ts": "f53adec6ae2a4581ddf0345a088e7830e1b23a427f5e193ee9049e224fdfb5c0"
   },
   "workspace": {
     "dependencies": [

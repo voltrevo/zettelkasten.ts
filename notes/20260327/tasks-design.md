@@ -60,20 +60,22 @@ If no tasks exist, return nothing (agent creates the initial breakdown).
 
 ## Turn budget awareness
 
-Problem: agents sometimes hit the max-turns limit without writing a summary
-or publishing. They have no way to see their own turn count mid-session.
+Problem: agents sometimes hit the max-turns limit without writing a summary or
+publishing. They have no way to see their own turn count mid-session.
 
 - `num_turns` only appears in the final `result` line of the JSONL stream
 - Individual `assistant`/`user` lines carry no turn counter
-- The worker can count turns externally but has no channel to communicate
-  back to the running agent
+- The worker can count turns externally but has no channel to communicate back
+  to the running agent
 - The agent cannot inspect its own turn usage
-- Putting the budget in the prompt ("you have 100 turns") doesn't help
-  without a way to check current usage
+- Putting the budget in the prompt ("you have 100 turns") doesn't help without a
+  way to check current usage
 
 Would need either:
+
 - Claude CLI support for injecting system messages mid-session
-- A tool the agent can call to check its turn count (requires claude CLI changes)
+- A tool the agent can call to check its turn count (requires claude CLI
+  changes)
 - Claude API-level turn tracking visible to the model
 
 Not proceeding with half-measures (prompt-only budget hint) since the agent
