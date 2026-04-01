@@ -8,7 +8,6 @@
  * GET /health → 200 "ok"
  */
 
-const TEST_RUNNER = new URL("./test-runner.ts", import.meta.url).pathname;
 const PROCESS_TIMEOUT_MS = 10_000;
 
 export { DEFAULT_CHECKER_PORT } from "./config.ts";
@@ -25,6 +24,61 @@ export interface CheckResult {
   durationMs: number;
   stdout: string;
   stderr: string;
+}
+
+function hashToUrl(serverUrl: string, hash: string): string {
+  return `${serverUrl}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
+    hash.slice(4)
+  }.ts`;
+}
+
+/**
+ * Fetch target source, rewrite imports, generate a static runner file.
+ * Both /check and /check-coverage use this so they agree on type checking.
+ * Returns the tmpDir path and runnerFile path. Caller must clean up tmpDir.
+ */
+async function prepareRunner(
+  body: CheckRequest,
+): Promise<{ tmpDir: string; runnerFile: string; serverHost: string }> {
+  const serverHost = new URL(body.serverUrl).host;
+  const targetUrl = hashToUrl(body.serverUrl, body.targetHash);
+  const targetRes = await fetch(targetUrl);
+  if (!targetRes.ok) {
+    throw new Error(`Failed to fetch target: ${targetRes.status}`);
+  }
+  let targetSource = await targetRes.text();
+
+  // Rewrite relative atom imports to HTTP URLs
+  targetSource = targetSource.replace(
+    /from\s+"\.\.\/\.\.\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+\.ts)"/g,
+    `from "${body.serverUrl}/a/$1/$2/$3"`,
+  );
+
+  const tmpDir = await Deno.makeTempDir({ prefix: "zts-check-" });
+  const targetFile = `${tmpDir}/target.ts`;
+  await Deno.writeTextFile(targetFile, targetSource);
+
+  const testImports = body.testHashes.map((h, i) =>
+    `import { Test as Test${i} } from "${hashToUrl(body.serverUrl, h)}";`
+  ).join("\n");
+  const testCalls = body.testHashes.map((_, i) =>
+    `Deno.test(Test${i}.name, () => new Test${i}().run(target));`
+  ).join("\n");
+  const runner = `
+import * as mod from "./target.ts";
+const target = Object.values(mod).find((v) => v !== undefined)!;
+${testImports}
+${testCalls}
+`;
+  const runnerFile = `${tmpDir}/runner_test.ts`;
+  await Deno.writeTextFile(runnerFile, runner);
+
+  return { tmpDir, runnerFile, serverHost };
+}
+
+function isTypeError(stderr: string): boolean {
+  return stderr.includes("Type checking failed") ||
+    stderr.includes("is not assignable to type");
 }
 
 async function handleCheck(req: Request): Promise<Response> {
@@ -55,27 +109,25 @@ async function handleCheck(req: Request): Promise<Response> {
     return new Response("Invalid target hash", { status: 400 });
   }
 
-  const serverHost = new URL(body.serverUrl).host;
   const start = performance.now();
-
-  const child = new Deno.Command(Deno.execPath(), {
-    args: [
-      "test",
-      `--allow-import=${serverHost}`,
-      `--allow-net=${serverHost}`,
-      "--no-lock",
-      TEST_RUNNER,
-      "--",
-      body.serverUrl,
-      body.targetHash,
-      body.testHashes.join(","),
-    ],
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
-
-  let output: { code: number; stdout: Uint8Array; stderr: Uint8Array };
+  let tmpDir: string | undefined;
   try {
+    const prepared = await prepareRunner(body);
+    tmpDir = prepared.tmpDir;
+
+    const child = new Deno.Command(Deno.execPath(), {
+      args: [
+        "test",
+        `--allow-import=${prepared.serverHost}`,
+        `--allow-net=${prepared.serverHost}`,
+        "--no-lock",
+        prepared.runnerFile,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+
+    let output: { code: number; stdout: Uint8Array; stderr: Uint8Array };
     let timer: ReturnType<typeof setTimeout>;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -98,6 +150,18 @@ async function handleCheck(req: Request): Promise<Response> {
       } catch { /* already dead */ }
       throw e;
     }
+
+    const durationMs = Math.round(performance.now() - start);
+    const result: CheckResult = {
+      passed: output.code === 0,
+      durationMs,
+      stdout: new TextDecoder().decode(output.stdout),
+      stderr: new TextDecoder().decode(output.stderr),
+    };
+
+    return new Response(JSON.stringify(result), {
+      headers: { "content-type": "application/json" },
+    });
   } catch (e) {
     const durationMs = Math.round(performance.now() - start);
     const result: CheckResult = {
@@ -109,19 +173,11 @@ async function handleCheck(req: Request): Promise<Response> {
     return new Response(JSON.stringify(result), {
       headers: { "content-type": "application/json" },
     });
+  } finally {
+    if (tmpDir) {
+      await Deno.remove(tmpDir, { recursive: true }).catch(() => {});
+    }
   }
-
-  const durationMs = Math.round(performance.now() - start);
-  const result: CheckResult = {
-    passed: output.code === 0,
-    durationMs,
-    stdout: new TextDecoder().decode(output.stdout),
-    stderr: new TextDecoder().decode(output.stderr),
-  };
-
-  return new Response(JSON.stringify(result), {
-    headers: { "content-type": "application/json" },
-  });
 }
 
 async function handleLint(req: Request): Promise<Response> {
@@ -210,50 +266,15 @@ async function handleCheckCoverage(req: Request): Promise<Response> {
     );
   }
 
-  const serverHost = new URL(body.serverUrl).host;
-  function hashToUrl(hash: string): string {
-    return `${body.serverUrl}/a/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${
-      hash.slice(4)
-    }.ts`;
-  }
-
-  // Fetch target source and write locally (coverage only instruments local files)
-  const targetUrl = hashToUrl(body.targetHash);
-  const targetRes = await fetch(targetUrl);
-  if (!targetRes.ok) {
-    return new Response(`Failed to fetch target: ${targetRes.status}`, {
-      status: 502,
-    });
-  }
-  let targetSource = await targetRes.text();
-
-  // Rewrite relative atom imports to HTTP URLs
-  targetSource = targetSource.replace(
-    /from\s+"\.\.\/\.\.\/([a-z0-9]{2})\/([a-z0-9]{2})\/([a-z0-9]+\.ts)"/g,
-    `from "${body.serverUrl}/a/$1/$2/$3"`,
-  );
-
-  const tmpDir = await Deno.makeTempDir({ prefix: "zts-cov-" });
+  let prepared: { tmpDir: string; runnerFile: string; serverHost: string };
   try {
-    const targetFile = `${tmpDir}/target.ts`;
-    await Deno.writeTextFile(targetFile, targetSource);
+    prepared = await prepareRunner(body);
+  } catch (e) {
+    return new Response((e as Error).message, { status: 502 });
+  }
+  const { tmpDir, runnerFile, serverHost } = prepared;
 
-    // Generate a test runner that imports target locally
-    const testImports = body.testHashes.map((h, i) =>
-      `import { Test as Test${i} } from "${hashToUrl(h)}";`
-    ).join("\n");
-    const testCalls = body.testHashes.map((_, i) =>
-      `Deno.test(Test${i}.name, () => new Test${i}().run(target));`
-    ).join("\n");
-    const runner = `
-import * as mod from "./target.ts";
-const target = Object.values(mod).find((v) => v !== undefined)!;
-${testImports}
-${testCalls}
-`;
-    const runnerFile = `${tmpDir}/runner_test.ts`;
-    await Deno.writeTextFile(runnerFile, runner);
-
+  try {
     const covDir = `${tmpDir}/cov`;
 
     // Run tests with coverage
@@ -271,11 +292,22 @@ ${testCalls}
     });
     const testOutput = await child.output();
     if (!testOutput.success) {
+      const stderr = new TextDecoder().decode(testOutput.stderr);
+      if (isTypeError(stderr)) {
+        return new Response(
+          JSON.stringify({
+            lineCoverage: 0,
+            branchCoverage: 0,
+            uncoveredLines: "Type checking failed — test is " +
+              "type-incompatible with target:\n" + stderr,
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({
           lineCoverage: 0,
-          uncoveredLines: "Tests failed:\n" +
-            new TextDecoder().decode(testOutput.stderr),
+          uncoveredLines: "Tests failed:\n" + stderr,
         }),
         { headers: { "content-type": "application/json" } },
       );
@@ -362,6 +394,7 @@ ${testCalls}
         const coveredLineNums = new Set(
           uncoveredLines.map((l) => parseInt(l.trim())),
         );
+        const targetSource = await Deno.readTextFile(`${tmpDir}/target.ts`);
         const srcLines = targetSource.split("\n");
         for (const ln of [...branchLines].sort((a, b) => a - b)) {
           if (!coveredLineNums.has(ln) && srcLines[ln - 1]) {

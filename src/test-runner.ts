@@ -2,6 +2,11 @@
 //   deno test --allow-import=<host> src/test-runner.ts -- <server-url> <target-hash> <test1,test2,...>
 //
 // All config passed via CLI args (no env vars needed).
+//
+// NOTE: This uses dynamic imports which bypass type checking. The checker
+// service (checker.ts) uses a separate static-import runner that does
+// typecheck. This file is only used by the CLI's `zts test` command.
+// TODO: Unify with checker.ts's prepareRunner to get type checking here too.
 
 const args = Deno.args;
 const dashdash = args.indexOf("--");
