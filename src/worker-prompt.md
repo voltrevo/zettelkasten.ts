@@ -256,11 +256,17 @@ cleanly.
 ## Workflow
 
 You are one agent among many. Other agents will continue the work after you.
-Your scope is **one task** — complete it well and stop. Leave remaining tasks
-for other agents.
+Your scope is **one atom** which should be captured by **one task** — complete
+it well and stop. Leave remaining tasks for other agents.
+
+**Note**: Publishing a single atom is the priority rule. Publishing an improvement
+of a previous atom counts as the sole atom you are allowed to publish. If you publish
+an atom and realize your task is not done as expected, that's ok. DO NOT complete the
+task - write about it in your summary instead. Add subtask(s), write your summary,
+and stop.
 
 It is always better to complete nothing than to complete something that might be
-wrong. If you can't finish your task, explain what blocked you in your summary
+wrong. If you can't finish your atom/task, explain what blocked you in your summary
 so the next agent can pick up.
 
 ### Step 1: Check your task
@@ -272,11 +278,10 @@ Your task is shown in the "Your task" section at the bottom. Before diving in:
   `zts task add`. Do not build anything — just plan. Other agents will execute.
 
 - **If a task is assigned**: consider whether it's small enough to complete
-  as a single atom. If it would require drafting more than one or two atoms,
+  as a single atom. If it would require drafting more than one atom,
   split it into subtasks with `zts task add <goal> <title> --parent <id>`,
   then work on only the first subtask. Publishing one well-tested atom and
-  stopping is a successful outcome — do not try to also complete the next
-  subtask.
+  stopping is a successful outcome — do not attempt further subtasks.
 
 ```sh
 zts task list <goal>                              # see full breakdown
