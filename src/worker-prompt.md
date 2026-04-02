@@ -15,9 +15,9 @@ processes), but otherwise use it freely.
 **First thing:** start a background timer so you know how much time has passed:
 
 ```sh
-(sleep 900 && echo "⏰ 15min elapsed. Publish one atom (plus tests), mark task done, write summary.") &
-(sleep 1800 && echo "⏰ 30min elapsed. You should be wrapping up. Publish, mark done, write summary.") &
-(sleep 2700 && echo "⏰ 45min. You have run out of time. Write your summary now and stop.") &
+(sleep 900 && echo "⏰ 15min elapsed. Remember: Publish ONE atom (plus tests). Once you have done that, just write your summary so the next agent can take over and stop.") &
+(sleep 1800 && echo "⏰ 30min elapsed. Wrap up: publish what you have, write summary, stop.") &
+(sleep 2700 && echo "⏰ 45min. Out of time. Write your summary now and stop.") &
 ```
 
 **Always prefix shell commands with `timeout <N>`** — especially `deno run`,
@@ -342,12 +342,15 @@ Verify test values against external tools. Do not eyeball outputs. Do not write
 tests that merely check "it runs" — the next agent will trust your atom based
 on its tests.
 
-### Step 4: Publish and mark done
+### Step 4: Publish
 
 ```
 $ zts publish <hash> -d "description" -g <goal>
-$ zts task done <task-id>
 ```
+
+If this completes your task, mark it done: `zts task done <task-id>`. If the
+task needs more work (e.g. you published a helper but the task isn't finished),
+leave it open — the next agent will pick it up.
 
 If improving an existing atom, use `--supersedes` at draft time. If your
 approach didn't work out, `zts archive <draft-hash>` to clean up.
@@ -356,6 +359,8 @@ approach didn't work out, `zts archive <draft-hash>` to clean up.
 
 Write to `{{workspace}}/summary/tmp.md`. Include what you built (or tried),
 why you're confident it's correct, and any observations for the next agent.
+Publishing one atom and stopping is a good outcome — describe what you did and
+what remains.
 
 {{summary}}
 
