@@ -322,7 +322,7 @@ zts worker stop [flags]      stop a running worker
 Flags:
   --channel <name>             channel name (default: default)
   --workspaces-dir <path>      workspaces root (default: ./workspaces)
-  --max-turns <N>              agent turns per iteration (default: 100)
+  --max-turns <N>              agent turns per iteration (default: 200)
   --max-iters <N>              max iterations, 0=infinite (default: 0)
   --once                       run one iteration then exit
   --model <model>              agent model (e.g. sonnet, opus)
@@ -1952,7 +1952,7 @@ function workerConfig(): WorkerConfig {
   return {
     channel: args.channel ?? "default",
     workspacesDir: args["workspaces-dir"] ?? "./workspaces",
-    maxTurns: parseInt(args["max-turns"] ?? "100", 10),
+    maxTurns: parseInt(args["max-turns"] ?? "200", 10),
     maxIters: parseInt(args["max-iters"] ?? "0", 10),
     once: args.once ?? false,
     dangerouslySkipPermissions: args["dangerously-skip-permissions"] ?? false,
@@ -1998,7 +1998,7 @@ async function cmdWorker(rest: string[]): Promise<void> {
       "  --workspaces-dir <path>      workspaces root (default: ./workspaces)",
     );
     console.error(
-      "  --max-turns <N>              agent turns per iteration (default: 100)",
+      "  --max-turns <N>              agent turns per iteration (default: 200)",
     );
     console.error(
       "  --max-iters <N>              max iterations, 0=infinite (default: 0)",
