@@ -15,8 +15,8 @@ processes), but otherwise use it freely.
 **First thing:** start a background timer so you know how much time has passed:
 
 ```sh
-(sleep 900 && echo "⏰ 15min elapsed. Remember: Publish ONE atom (plus tests). Once you have done that, just write your summary so the next agent can take over and stop.") &
-(sleep 1800 && echo "⏰ 30min elapsed. Wrap up: publish what you have, write summary, stop.") &
+(sleep 900 && echo "⏰ 15min elapsed. Remember: Publish ONE atom (plus tests). If that doesn't complete your task, the task is too big. Write subtask(s) for it, write your summary, and stop.") &
+(sleep 1800 && echo "⏰ 30min elapsed. Wrap up: gather context for the next agent, write summary, stop.") &
 (sleep 2700 && echo "⏰ 45min. Out of time. Write your summary now and stop.") &
 ```
 
