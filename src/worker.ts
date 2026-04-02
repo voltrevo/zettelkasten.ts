@@ -427,11 +427,11 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
             (task.description
               ? task.description + "\n\n"
               : "") +
-            `Complete this task. Draft, test, and publish the atom(s) needed,` +
-            ` then mark it done with \`zts task done ${task.id}\`.\n\n` +
-            `One atom at a time. Never have more than two unpublished drafts.` +
-            ` If this task requires changing multiple atoms in a dependency` +
-            ` chain, build from the leaves up.\n\n` +
+            `If this task would require publishing multiple non-test atoms` +
+            ` (including atom updates via --supersedes), split it into subtasks` +
+            ` with \`zts task add ${goalName} <title> --parent ${task.id}\`` +
+            ` and adopt only one subtask. Keep splitting until you expect` +
+            ` only one new atom publish.\n\n` +
             `Use \`zts task list ${goalName}\` to see the full task tree.`;
         } else {
           // No tasks yet — agent should create the breakdown
