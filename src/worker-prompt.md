@@ -263,10 +263,12 @@ Your task is shown in the "Your task" section at the bottom. Before diving in:
   goal spec, check coverage, and create an ordered task breakdown with
   `zts task add`. Do not build anything — just plan. Other agents will execute.
 
-- **If a task is assigned**: consider whether it's small enough to complete.
-  If it would require drafting more than one or two atoms, split it into
-  subtasks with `zts task add <goal> <title> --parent <id>`, then work on
-  only the first subtask.
+- **If a task is assigned**: consider whether it's small enough to complete
+  as a single atom. If it would require drafting more than one or two atoms,
+  split it into subtasks with `zts task add <goal> <title> --parent <id>`,
+  then work on only the first subtask. Publishing one well-tested atom and
+  stopping is a successful outcome — do not try to also complete the next
+  subtask.
 
 ```sh
 zts task list <goal>                              # see full breakdown
@@ -307,10 +309,16 @@ $ timeout 10 deno run -A ./tmp/explore.ts   # test with real inputs
 $ python3 -c "print(...)"                   # verify expected values
 ```
 
-If your draft is rejected for exceeding the size limit, **split your task** into
-subtasks with `zts task add --parent <id>`. Extract the most foundational piece
-into its own task (the one other pieces would import). Work on that subtask
-only — leave the rest for other agents.
+If your draft is rejected for exceeding the size limit, **your task just
+changed.** Stop trying to complete the original task. Instead:
+
+1. Split it into subtasks with `zts task add --parent <id>`
+2. Mark the original task as a parent (it's no longer a leaf)
+3. Work on only the first subtask — the most foundational piece
+4. Publish that one piece, mark it done, write your summary, and stop
+
+The remaining subtasks are for other agents. Do not continue to the next
+subtask yourself. Your scope is one task.
 
 **Splitting is also a debugging strategy.** If something isn't working, extract
 the suspicious part into its own atom with its own tests. A function that's hard
