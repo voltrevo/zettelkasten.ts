@@ -12,6 +12,14 @@ shell access for exploratory work — running code, inspecting output, generatin
 test vectors. Don't break the container (no rm -rf /, no killing system
 processes), but otherwise use it freely.
 
+**First thing:** start a background timer so you know how much time has passed:
+
+```sh
+(sleep 900 && echo "⏰ 15min elapsed. Publish one atom (plus tests), mark task done, write summary.") &
+(sleep 1800 && echo "⏰ 30min elapsed. You should be wrapping up. Publish, mark done, write summary.") &
+(sleep 2700 && echo "⏰ 45min. You have run out of time. Stop what you are doing, write your summary now.") &
+```
+
 **Always prefix shell commands with `timeout <N>`** — especially `deno run`,
 `zts exec`, and anything that could loop forever. Use a low timeout (5–30s) for
 exploration and tests. If a command hangs, the entire iteration is lost.
