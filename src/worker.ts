@@ -304,19 +304,19 @@ function createPrettyEmitter(prettyPath: string) {
   function emitResult(content: string, isError: boolean) {
     const color = isError ? C.red : C.gray;
     const lines = content.split("\n");
-    if (lines.length > 10) {
-      for (const l of lines.slice(0, 2)) {
-        emitLn(`  ${color}→ ${midTrunc(l, 120)}${C.reset}`);
+    if (lines.length > 20) {
+      for (const l of lines.slice(0, 4)) {
+        emitLn(`  ${color}→ ${midTrunc(l, 240)}${C.reset}`);
       }
       emitLn(
-        `  ${color}  ... ${lines.length - 4} more lines ...${C.reset}`,
+        `  ${color}  ... ${lines.length - 8} more lines ...${C.reset}`,
       );
-      for (const l of lines.slice(-2)) {
-        emitLn(`  ${color}→ ${midTrunc(l, 120)}${C.reset}`);
+      for (const l of lines.slice(-4)) {
+        emitLn(`  ${color}→ ${midTrunc(l, 240)}${C.reset}`);
       }
     } else {
       for (const l of lines) {
-        emitLn(`  ${color}→ ${midTrunc(l, 120)}${C.reset}`);
+        emitLn(`  ${color}→ ${midTrunc(l, 240)}${C.reset}`);
       }
     }
   }
@@ -619,7 +619,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                 );
                 if (obj.errors?.length) {
                   for (const e of obj.errors.slice(0, 3)) {
-                    emitLn(`${C.red}  ${midTrunc(e, 200)}${C.reset}`);
+                    emitLn(`${C.red}  ${midTrunc(e, 400)}${C.reset}`);
                   }
                 }
                 continue;
@@ -641,7 +641,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                     if (block.name === "Bash" && input.command) {
                       emitLn(
                         `  ${C.bold}${C.green}$ ${
-                          midTrunc(input.command, 200)
+                          midTrunc(input.command, 400)
                         }${C.reset}`,
                       );
                     } else if (block.name === "Write" && input.file_path) {
@@ -679,7 +679,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                     } else {
                       emitLn(
                         `  ${C.dim}${C.green}${block.name}: ${
-                          midTrunc(JSON.stringify(input), 100)
+                          midTrunc(JSON.stringify(input), 200)
                         }${C.reset}`,
                       );
                     }
@@ -688,7 +688,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                   if (block.type === "thinking" && block.thinking?.trim()) {
                     emitLn(
                       `  ${C.gray}thinking: ${
-                        midTrunc(block.thinking.trim(), 240)
+                        midTrunc(block.thinking.trim(), 480)
                       }${C.reset}`,
                     );
                     lastWasTool = true;
@@ -714,7 +714,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
                   if (block.type === "text" && block.text) {
                     emitLn(
                       `  ${C.gray}[user: ${
-                        midTrunc(block.text.trim(), 80)
+                        midTrunc(block.text.trim(), 160)
                       }]${C.reset}`,
                     );
                   }
