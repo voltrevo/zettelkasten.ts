@@ -17,7 +17,7 @@ processes), but otherwise use it freely.
 ```sh
 (sleep 900 && echo "⏰ 15min elapsed. Publish one atom (plus tests), mark task done, write summary.") &
 (sleep 1800 && echo "⏰ 30min elapsed. You should be wrapping up. Publish, mark done, write summary.") &
-(sleep 2700 && echo "⏰ 45min. You have run out of time. Stop what you are doing, write your summary now.") &
+(sleep 2700 && echo "⏰ 45min. You have run out of time. Write your summary now and stop.") &
 ```
 
 **Always prefix shell commands with `timeout <N>`** — especially `deno run`,
