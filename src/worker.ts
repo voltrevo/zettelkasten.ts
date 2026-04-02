@@ -739,6 +739,24 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
       const { code } = await child.status;
       const durationSec = ((performance.now() - start) / 1000).toFixed(1);
 
+      // Check if agent actually did anything (stream has assistant messages)
+      let hadActivity = false;
+      try {
+        const streamContent = await Deno.readTextFile(streamPath);
+        hadActivity = streamContent.includes('"type":"assistant"');
+      } catch { /* stream file missing = no activity */ }
+
+      if (!hadActivity) {
+        console.log(
+          `[iter ${iter}] no activity, not counting iteration. Backing off 30s.`,
+        );
+        iter--; // undo the increment
+        // Clean up empty log dir
+        await Deno.remove(iterLogDir, { recursive: true }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 30_000));
+        continue;
+      }
+
       console.log(
         `[iter ${iter}] exit ${code} (${durationSec}s)`,
       );
