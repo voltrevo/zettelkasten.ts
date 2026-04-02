@@ -1109,7 +1109,7 @@ async function cmdInfo(rest: string[]): Promise<void> {
     console.log(`hash:        ${info.hash}`);
     console.log(`url:         ${info.url}`);
     console.log(`description: ${info.description}`);
-    console.log(`size:        ${info.gzipSize} bytes (min+gz)`);
+    console.log(`size:        ${info.gzipSize} tokens`);
     if (info.goal) console.log(`goal:        ${info.goal}`);
     console.log(`created:     ${info.createdAt}`);
     if (info.imports.length > 0) {
