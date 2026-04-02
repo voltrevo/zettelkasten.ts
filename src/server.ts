@@ -356,8 +356,22 @@ async function route(req: Request): Promise<Response> {
     const tokens = countTokens(content);
     db.insertAtom(hash, content, tokens, "", undefined, "draft");
 
-    // Auto-register import relationships
-    for (const dep of extractDependencies(content)) {
+    // Auto-register import relationships (all imports must be published)
+    const deps = extractDependencies(content);
+    for (const dep of deps) {
+      const depStatus = db.getAtomStatus(dep);
+      if (depStatus !== "published") {
+        // Clean up the just-inserted draft
+        db.deleteAtom(hash);
+        const label = depStatus === "draft" ? "a draft" : "not found";
+        return new Response(
+          `Cannot draft: import ${dep.slice(0, 8)}… is ${label}. ` +
+            `Publish dependencies first.`,
+          { status: 422 },
+        );
+      }
+    }
+    for (const dep of deps) {
       db.insertRelationship(hash, "imports", dep);
     }
 
